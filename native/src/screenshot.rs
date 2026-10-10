@@ -767,6 +767,7 @@ mod win {
     use windows::Win32::Graphics::Dxgi::Common::*;
     use windows::Win32::Graphics::Dxgi::*;
     use windows::Win32::Graphics::Gdi::*;
+    use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
     use windows::Win32::UI::WindowsAndMessaging::*;
 
     // ── Cached DXGI resources ────────────────────────────────────────────
@@ -996,12 +997,26 @@ mod win {
         }
     }
 
-    /// Capture a specific window via GDI BitBlt.
+    /// True when a BGRA frame has no visible RGB content. Ignore alpha:
+    /// some GDI device contexts initialize the alpha byte to zero.
+    fn is_black_bgra(pixels: &[u8]) -> bool {
+        !pixels.is_empty()
+            && pixels.chunks_exact(4).all(|p| p[0] == 0 && p[1] == 0 && p[2] == 0)
+    }
+
+    /// Capture a window using BitBlt, then try PrintWindow(PW_RENDERFULLCONTENT)
+    /// if GDI returned no pixels, failed to blit, or produced a fully black frame.
+    ///
+    /// PrintWindow can recover content in some occluded / hardware accelerated
+    /// windows; it is not a replacement for Windows.Graphics.Capture. If both
+    /// methods return a valid black frame, keep it: a black UI can be legitimate.
     fn capture_window(hwnd_val: u32) -> napi::Result<(Vec<u8>, u32, u32)> {
         unsafe {
             let hwnd = HWND(hwnd_val as *mut _);
             let mut rect = RECT::default();
-            let _ = GetWindowRect(hwnd, &mut rect);
+            if GetWindowRect(hwnd, &mut rect).is_err() {
+                return Err(napi::Error::from_reason("GetWindowRect failed"));
+            }
             let w = (rect.right - rect.left).max(1) as u32;
             let h = (rect.bottom - rect.top).max(1) as u32;
 
@@ -1013,8 +1028,7 @@ mod win {
             let hbm = CreateCompatibleBitmap(hdc_win, w as i32, h as i32);
             let old = SelectObject(hdc_mem, hbm);
 
-            let _ = BitBlt(hdc_mem, 0, 0, w as i32, h as i32, hdc_win, 0, 0, SRCCOPY);
-
+            let blit_ok = BitBlt(hdc_mem, 0, 0, w as i32, h as i32, hdc_win, 0, 0, SRCCOPY).as_bool();
             let mut bmi = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
                     biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -1028,22 +1042,52 @@ mod win {
                 ..Default::default()
             };
             let mut pixels = vec![0u8; (w * h * 4) as usize];
-            GetDIBits(
-                hdc_mem,
-                hbm,
-                0,
-                h,
-                Some(pixels.as_mut_ptr() as *mut _),
-                &mut bmi,
-                DIB_RGB_COLORS,
+            let read_rows = GetDIBits(
+                hdc_mem, hbm, 0, h,
+                Some(pixels.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS,
             );
+            let mut captured = blit_ok && read_rows > 0;
+
+            if !captured || is_black_bgra(&pixels) {
+                // Use the documented PW_RENDERFULLCONTENT value for apps that
+                // render outside the classic WM_PRINT client painting path.
+                let printed = PrintWindow(hwnd, hdc_mem, PRINT_WINDOW_FLAGS(0x00000002)).as_bool();
+                if printed {
+                    let mut alternate = vec![0u8; pixels.len()];
+                    let rows = GetDIBits(
+                        hdc_mem, hbm, 0, h,
+                        Some(alternate.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS,
+                    );
+                    if rows > 0 && (!is_black_bgra(&alternate) || !captured) {
+                        pixels = alternate;
+                        captured = true;
+                    }
+                }
+            }
 
             SelectObject(hdc_mem, old);
             let _ = DeleteObject(hbm);
             let _ = DeleteDC(hdc_mem);
             ReleaseDC(hwnd, hdc_win);
 
+            if !captured {
+                return Err(napi::Error::from_reason(
+                    "Window capture failed: BitBlt and PrintWindow did not produce readable pixels",
+                ));
+            }
             Ok((pixels, w, h))
+        }
+    }
+
+    #[cfg(test)]
+    mod window_capture_tests {
+        use super::is_black_bgra;
+
+        #[test]
+        fn detect_empty_or_unpainted_window_frame() {
+            assert!(!is_black_bgra(&[]));
+            assert!(is_black_bgra(&[0, 0, 0, 255, 0, 0, 0, 0]));
+            assert!(!is_black_bgra(&[0, 0, 1, 255, 0, 0, 0, 255]));
         }
     }
 
