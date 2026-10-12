@@ -14,9 +14,9 @@ This guide covers how to integrate `computer-use-mcp` into AI agent frameworks a
 **Profiles:** `COMPUTER_USE_PROFILE=core|desktop|ax|scripting|windows-admin|full` (default `desktop` since 7.6: core plus the OCR and wait tools and `agent_pointer`; `full` lists everything)
 
 **Current surface (7.6.0):**
-- **Default list.** On macOS the default `desktop` profile lists 39 tools and 45,942 bytes on the wire (about 12k tokens);
+- **Default list.** On macOS the default `desktop` profile lists 40 tools (7.6.1: `unhide_app` joined `core`) and about 44 KB on the wire (about 12k tokens);
   `COMPUTER_USE_PROFILE=full` lists 76 tools and 84,037 bytes (112,727 before 7.6). Tool counts by profile on macOS:
-  core 36, desktop 39, scripting 42, windows-admin 49, ax 57, full 76 (Windows 34/35/38/47/53/74, Linux 34/35/38/39/53/66).
+  core 37, desktop 40, scripting 43, windows-admin 50, ax 57, full 76 (Windows 35/36/39/48/53/74, Linux 35/36/39/40/53/66).
   Byte budgets are under test (`desktop` 48,000, `full` 88,000).
 - **Only tools that exist here are listed.** The catalog gives each tool `platforms` and a `job` (`observe`, `act`,
   `semantic`, `script`, `admin`, `browser`, `spaces`, `meta`). `registry` and `notification` are Windows-only;
@@ -47,6 +47,26 @@ This guide covers how to integrate `computer-use-mcp` into AI agent frameworks a
 - **v7.6 capture helper:** window capture and OCR run through a Swift ScreenCaptureKit helper. Two captures at once used to hang, so helper runs are serialised within a server and across servers (an advisory lock at `~/Library/Caches/computer-use-mcp/helper.lock`; a call waits for a live holder, takes the lock over from a dead one, and gives up with `helper_busy`). A helper killed by the timeout is reported as `helper_timeout`; the helper itself gives up on a stalled capture after 10 s with `sck_timeout`.
 - **v7.6 fixes worth knowing:** the user-active guard no longer refuses the first input call of a fresh server (its clock is seeded from the system's HID idle counter). `process_kill` refuses `pid` below 2 and matches `name` exactly; an ambiguous name returns `ambiguous_name` unless `all: true`. `hold_key` is capped at 10 s. Empty or non-numeric `COMPUTER_USE_MAX_TASKS`, `COMPUTER_USE_TASK_TTL_MS` and `COMPUTER_USE_TASK_POLL_INTERVAL_MS` fall back to their defaults with a stderr note instead of ending start-up.
 - **v7.6 launcher:** `dist/launch.js` is the package `bin`. It imports only Node built-ins, checks that `node_modules`, `dist/server.js` and the native addon exist, and when one is missing prints the fix (`npm ci`, `npm run build:ts`, `npm run build:native`) to stderr and exits 2, instead of the host seeing "connection closed" with no reason. `npm run build:ts` builds into `dist.next` and swaps it in, so a server starting mid-build still finds `dist/`.
+
+## The status card: a person can see, pause and stop the agent (7.6.1)
+
+Set `COMPUTER_USE_STATUS_CARD=true` and a small always-on-top card appears on the first desktop action: "Agent is using
+this Mac · 1:42", the current action as the server resolved it ("click (640, 410) in TextEdit · Untitled", "type 24
+chars in Safari · Login"; typed text is never shown), the last few actions with ✓/✕, and two buttons.
+
+- **Pause** refuses every new mutating call with `paused_by_user` and aborts the one in flight; observation tools keep
+  working. **Resume** lets mutations through again.
+- **Stop** does the same for the rest of the session (`stopped_by_user`) and trips the native emergency-stop latch, so a
+  drag or a hold stops mid-gesture. Restart the server to resume.
+- The card also says when the agent is waiting for you to stop typing (`user_active`) or for an approval.
+- `control_status` (core, read-only) returns the state, since when, and what the agent is waiting on. An agent that
+  receives `paused_by_user` should wait and retry or report; one that receives `stopped_by_user` should report what it
+  has and finish.
+- The card is excluded from screen capture on both platforms, so the agent never sees its own controls and injected text
+  cannot point it at them; it watches the server's pid and closes when the server is gone.
+- macOS: a Swift panel compiled on first use (needs the Xcode Command Line Tools, like the capture helper). Windows:
+  PowerShell and WPF (the lineage of PR #40). Linux: the control state and `control_status` work; there is no card yet.
+- `doctor` reports `status_card`. Hosts embedding the server can drive the same state through `SessionOptions.operatorControl`.
 
 ## Default security posture
 
@@ -112,7 +132,7 @@ constant time.
 
 | Variable | Effect |
 |---|---|
-| `COMPUTER_USE_PROFILE` | `core \| desktop \| ax \| scripting \| windows-admin \| full` (default `desktop` since 7.6; on macOS 39 tools against 76 for `full`). Bounds the maximum exposed tool surface. Profiles nest: core, then desktop, then ax, scripting or windows-admin, then full. |
+| `COMPUTER_USE_PROFILE` | `core \| desktop \| ax \| scripting \| windows-admin \| full` (default `desktop` since 7.6; on macOS 40 tools against 76 for `full`). Bounds the maximum exposed tool surface. Profiles nest: core, then desktop, then ax, scripting or windows-admin, then full. |
 | `COMPUTER_USE_ACTIVE_PROFILE` | Starting profile within that bound; may be narrowed at runtime but never widened past `COMPUTER_USE_PROFILE`. |
 | `COMPUTER_USE_NATIVE_PATH` | Override native `.node` resolution (else: separately installed platform package → bundled binary). |
 | `COMPUTER_USE_ADVERTISE_APPROVAL_TOKEN=true` | v7.6: advertise `approval_token` on every mutating tool's schema again, as before 7.6 (off by default; the token is accepted in `_meta` either way). |
@@ -122,6 +142,7 @@ constant time.
 | `COMPUTER_USE_PREPARE_KEEP_VISIBLE` | Comma-separated bundle IDs that `focus_strategy: "prepare_display"` must not hide. Defaults to the target plus the terminal. |
 | `COMPUTER_USE_SPACES_BACKEND` | `auto \| yabai \| mission_control \| cgs` — virtual-desktop backend selection on macOS. |
 | `COMPUTER_USE_PROVIDER`, `COMPUTER_USE_WIDTH`, `COMPUTER_USE_QUALITY`, `COMPUTER_USE_VISION` | Screenshot defaults: provider preset, width, JPEG quality (`0` = PNG), and whether vision is enabled. |
+| `COMPUTER_USE_STATUS_CARD` | 7.6.1: `true` shows the desktop status card (macOS, Windows): what the agent is doing, Pause/Resume, Stop. Off by default in 7.6.1. The card never appears in screenshots and closes when the server exits. |
 | `COMPUTER_USE_USER_IDLE_MS` | v7.5: refuse to activate an app or post keyboard/mouse input within this many ms of the user's last physical input (default `4000` on macOS; `0` disables; Windows and Linux only when set). Such a call returns `user_active` unless it passes `force: true` or uses `delivery: "pid"`. The guard needs Input Monitoring for the host app; without it the guard allows everything and `doctor` reports the clock as unavailable. |
 
 ### Hosting and runtime
@@ -265,7 +286,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createComputerUseServer } from '@zavora-ai/computer-use-mcp'
 import { connectInProcess } from '@zavora-ai/computer-use-mcp/client'
 
-// Start the MCP server in-process. The default profile is `desktop` (39 tools on macOS, about 12k tokens of
+// Start the MCP server in-process. The default profile is `desktop` (40 tools on macOS, about 12k tokens of
 // schemas); pass createComputerUseServer({ profile: 'full' }) for every tool.
 const server = createComputerUseServer()
 const mcpClient = await connectInProcess(server)
@@ -852,7 +873,7 @@ await client.callTool('scrape', { url: 'https://example.com' })
 Enable it with `runConsole: true` (or run `computer-use-mcp-console`). It adds eight
 tools (`run_start`, `run_plan`, `run_progress`, `run_say`, `run_spend`, `run_cancel`,
 `run_attachment`, `run_console`) and an MCP App at `ui://computer-use/run-console/v1`,
-on top of whatever profile is active (macOS `desktop` 39 to 47, `full` 76 to 84). A plan the agent declares and the frames it captures render live in a
+on top of whatever profile is active (macOS `desktop` 40 to 48, `full` 76 to 84). A plan the agent declares and the frames it captures render live in a
 browser, so a person follows the work instead of a tool log.
 
 ```typescript
@@ -1012,7 +1033,7 @@ usable controls.
 Since 7.6 a tool that does not exist on the running platform is neither listed nor
 callable (`registry` and `notification` only on Windows; the OCR and `wait_for_*` text
 and stability tools only on macOS; Spaces on macOS and Windows), so the tool count
-differs by platform: the default `desktop` profile lists 39 tools on macOS and 35 on
+differs by platform: the default `desktop` profile lists 40 tools on macOS and 36 on
 Windows and Linux, and `full` lists 76, 74 and 66. Before 7.6 such a tool was listed
 and answered `platform_unsupported`; `get_app_dictionary` and `list_menu_bar` (macOS-only in practice) are still listed on
 Windows and Linux and still answer it.

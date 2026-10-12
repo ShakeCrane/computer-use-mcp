@@ -47,6 +47,8 @@ export async function runDoctor(options: {
   auditEnabled: boolean
   auditLogPath: string
   execFileSync?: typeof defaultExecFileSync
+  /** 7.6.1: the operator control state (the desktop status card). */
+  controlStatus?: () => Record<string, unknown>
   /** v7.5: agent-desktop state — helper build, user-active guard, pid delivery records. */
   agentDesktop?: () => Promise<{
     helper?: { ok: boolean; path?: string; reason?: string; remediation?: string; sck?: boolean } | null
@@ -289,6 +291,28 @@ export async function runDoctor(options: {
       }
     } catch (error) {
       add({ id: 'agent_helper', status: 'warn', summary: failure(error) })
+    }
+  }
+
+  if (options.controlStatus) {
+    try {
+      const control = options.controlStatus()
+      const card = control.card as { enabled?: boolean; presenter?: string; launched?: boolean; error?: string | null } | undefined
+      add({
+        id: 'status_card',
+        status: !card?.enabled ? 'skip' : card.error ? 'warn' : 'pass',
+        summary: !card?.enabled
+          ? 'Desktop status card off (set COMPUTER_USE_STATUS_CARD=true to show the person what the agent does, with Pause and Stop).'
+          : card.error
+            ? `Desktop status card could not start: ${card.error}`
+            : `Desktop status card ${card.launched ? 'shown' : 'ready'} (${card.presenter}); control state ${String(control.state)}.`,
+        details: control,
+        remediation: [platform === 'darwin'
+          ? 'The macOS card is compiled on first use with swiftc (Xcode Command Line Tools).'
+          : platform === 'win32' ? 'The Windows card needs powershell.exe on PATH.' : 'No card on this platform yet; the control state still applies.'],
+      })
+    } catch (error) {
+      add({ id: 'status_card', status: 'warn', summary: failure(error) })
     }
   }
 

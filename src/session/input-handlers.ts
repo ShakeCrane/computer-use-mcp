@@ -391,8 +391,9 @@ export class InputHandler {
 
     if (tool === 'left_mouse_down' || tool === 'left_mouse_up') {
       const resolved = target()
-      await focus(resolved)
       const [x, y] = coordinate()
+      this.#validateCoordinates(x, y)
+      await focus(resolved)
       this.#native.mouseButton(tool === 'left_mouse_down' ? 'press' : 'release', x, y)
       if (resolved.bundleId) this.#targets.update(resolved, 'pointer')
       return ok(tool === 'left_mouse_down' ? 'Mouse down' : 'Mouse up')
@@ -418,6 +419,7 @@ export class InputHandler {
         if (resolved.bundleId) this.#targets.update(resolved, 'pointer')
         return ok(`Scrolled ${direction} ${amount}${this.#pidNote(route, outcome)}`)
       }
+      this.#validateCoordinates(x, y)
       await focus(resolved)
       this.#native.mouseMove(x, y)
       await this.#sleep(15)
@@ -584,6 +586,7 @@ export class InputHandler {
         }
       }
       if (locations.length === 0) return this.#noCoordinates()
+      for (const [x, y] of locations) this.#validateCoordinates(x, y)
       // press_ctrl advertises default true, so additive is the documented behavior.
       // The modifier has to be held across the click, which only the native
       // additive entry point does — tapping it separately selects nothing.
@@ -624,6 +627,7 @@ export class InputHandler {
       }
     }
     if (edits.length === 0) return this.#noCoordinates()
+    for (const [x, y] of edits) this.#validateCoordinates(x, y)
     for (const [x, y, text] of edits) {
       this.#checkAbort(signal, 'multi_edit aborted before the next edit')
       this.#native.mouseMove(x, y)

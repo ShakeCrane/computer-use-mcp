@@ -1,8 +1,9 @@
 import type { AXElement, NativeModule, WindowRecord } from '../native.js'
-import { ok, okJson, platformUnsupported, type ToolResult } from '../result.js'
+import { errJson, ok, okJson, platformUnsupported, type ToolResult } from '../result.js'
 import { lookupToolGuide } from './tool-guide.js'
 import { selectMainWindow } from './window-select.js'
 import type { FocusController } from './focus.js'
+import type { InputHandler } from './input-handlers.js'
 import type { SpawnResult } from './spawn.js'
 import type { ScriptingDictionary } from './scripting-dictionary.js'
 import type { TargetStateController } from './target-state.js'
@@ -21,6 +22,8 @@ export interface AccessibilityHandlerContext {
   getAppDictionary(bundleId: string, suite?: string): Promise<DictionaryResult>
   /** v7.5 (R5): what pid delivery did for an app the last time it was tried. */
   pidDelivery?(bundleId: string): unknown
+  /** 7.6.1: the click_element coordinate fallback posts through the input handler (guard, validation, target). */
+  input?: Pick<InputHandler, 'clickAt'>
 }
 
 /** AX nodes counted by get_app_capabilities' probe (walk depth 3, capped). */
@@ -80,7 +83,11 @@ function windowId(args: Record<string, unknown>): number {
   return args.window_id
 }
 
-const SENSITIVE_ROLE = /pass(?:word|code)?|secure|credential|one.?time|otp|pin|cvv|cvc/i
+// Roles are identifiers (AXSecureTextField, uia_is_password), so a substring match is right for them.
+const SENSITIVE_ROLE = /secure|password|passcode|credential|one.?time|otp/i
+// Labels are prose. 7.6.1: match whole words only; the old substring match blanked "Shipping address", "Compass",
+// "Pinned tabs", "Opinion", "Spinner" and "Passport number" (pin, pass).
+const SENSITIVE_LABEL = /\b(?:pass(?:word|code|phrase|wd)?|passwd|pin|otp|cvv|cvc|secret|credentials?|security code|secure|one[- ]?time(?:[- ]?(?:code|password|passcode))?)\b/i
 const TRUSTED_SENSITIVITY_SIGNALS = new Set([
   'secure_role', 'secure_subrole', 'protected_content', 'uia_is_password',
 ])
@@ -101,7 +108,7 @@ export function sanitizeAccessibilityResult(value: unknown): unknown {
   const sensitive = input.sensitive === true
     || signals.length > 0
     || (typeof input.role === 'string' && SENSITIVE_ROLE.test(input.role))
-    || (typeof input.label === 'string' && SENSITIVE_ROLE.test(input.label))
+    || (typeof input.label === 'string' && SENSITIVE_LABEL.test(input.label))
   if (sensitive) output.sensitive = true
   else if (input.sensitive === false) output.sensitive = false
   else delete output.sensitive
@@ -205,11 +212,13 @@ export async function handleAccessibilityTool(
         return ok(`Clicked ${role} "${label}"`)
       }
       if (result.reason === 'unsupported_action' && result.bounds) {
+        // 7.6.1: the fallback used to post a real click straight to the native layer, past the user-active guard
+        // and coordinate validation. It now goes through the same path as `click`.
+        if (!context.input) return errJson({ error: 'input_unavailable', tool, message: 'AXPress is unsupported here and no input handler is configured for the coordinate fallback.' })
         const x = Math.round(result.bounds.x + result.bounds.width / 2)
         const y = Math.round(result.bounds.y + result.bounds.height / 2)
-        native.mouseMove(x, y)
-        await context.sleep(50)
-        native.mouseClick(x, y, 'left', 1)
+        const clicked = await context.input.clickAt({ x, y }, 'left', 1, 'click_element', { ...args, target_window_id: target.windowId })
+        if (clicked.isError) return clicked
         context.targets.update(target, 'pointer')
         return ok(`Clicked ${role} "${label}" via coordinate fallback (${x}, ${y})`)
       }
@@ -341,11 +350,15 @@ export async function handleAccessibilityTool(
     const bundleId = stringArg(args, 'bundle_id')
     const running = native.listRunningApps().find(app => app.bundleId === bundleId)
     const windows = native.listWindows(bundleId)
-    if (isWindows) return okJson({
-      bundle_id: bundleId, scriptable: false, suites: [], powershell: true,
-      accessible: windows.length > 0, topLevelCount: windows.length,
-      running: Boolean(running), hidden: running?.isHidden ?? false,
-    })
+    if (isWindows) {
+      // 7.6.1: the same probe as macOS; `accessible` means real controls, not "has a window".
+      const accessibility = probeMainWindow(native, windows)
+      return okJson({
+        bundle_id: bundleId, scriptable: false, suites: [], powershell: true,
+        accessible: accessibility.hasControls, accessibility, topLevelCount: windows.length,
+        running: Boolean(running), hidden: running?.isHidden ?? false,
+      })
+    }
     const pidDelivery = context.pidDelivery ? { pidDelivery: context.pidDelivery(bundleId) ?? null } : {}
     const dictionary = await context.getAppDictionary(bundleId)
     const scriptable = !('error' in dictionary)

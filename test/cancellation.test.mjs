@@ -72,19 +72,27 @@ test('run_script threads the abort signal into spawnBounded', macOnly, async () 
   const ctrl = new AbortController()
   const r = await session.dispatch('run_script', { language: 'applescript', script: 'return 1' }, ctrl.signal)
   assert.ok(!r.isError, 'mock script should succeed')
-  assert.equal(capturedSignal, ctrl.signal, 'the same AbortSignal must reach spawnBounded')
+  // 7.6.1: mutating calls run under the caller's signal merged with the operator control's (Pause and Stop abort
+  // the call in flight), so the signal spawnBounded sees is a composite; what matters is that the caller's abort
+  // reaches it.
+  assert.ok(capturedSignal instanceof AbortSignal, 'an AbortSignal reaches spawnBounded')
+  assert.equal(capturedSignal.aborted, false)
+  ctrl.abort()
+  assert.equal(capturedSignal.aborted, true, 'the caller\'s abort reaches spawnBounded')
 })
 
-test('run_script without a signal passes undefined to spawnBounded (back-compat)', macOnly, async () => {
-  let sawArgCount = -1
+test('run_script without a caller signal never receives a stale or aborted one (back-compat)', macOnly, async () => {
+  let received = 'not-called'
   const spawnBounded = (...a) => {
-    sawArgCount = a.length >= 4 ? (a[3] === undefined ? 3 : 4) : a.length
+    received = a[3]
     return Promise.resolve({ stdout: 'ok', stderr: '', code: 0, timedOut: false })
   }
   const session = createSession({ disableSessionLock: true, spawnBounded })
   const r = await session.dispatch('run_script', { language: 'applescript', script: 'return 1' })
   assert.ok(!r.isError)
-  assert.equal(sawArgCount, 3, 'no signal → spawnBounded receives undefined as 4th arg')
+  // 7.6.1: a mutating call always carries the operator control's signal (so Pause and Stop can abort it); with no
+  // caller signal that is the only one, and it is live. Before 7.6.1 the argument was undefined.
+  assert.ok(received === undefined || (received instanceof AbortSignal && !received.aborted), 'undefined or a live signal')
 })
 
 // Real-process abort uses the default spawnBounded (SIGKILL on abort).

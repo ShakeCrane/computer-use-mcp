@@ -129,7 +129,7 @@ const NONE_READ = (tier: ProfileName = 'core', extra?: Partial<ToolMeta>): ToolM
 const NONE_MUT = (tier: ProfileName = 'core', extra?: Partial<ToolMeta>): ToolMeta =>
   m('none', true, { requiresFocus: false, tier, ...extra })
 
-/** Appendix A + B — every tool (73 in v7.5; 80 in v7.6 with click, set_target, get_target, wait_for_text, wait_for_stable) */
+/** Appendix A + B — every tool (73 in v7.5; 78 in v7.6 with click, set_target, get_target, wait_for_text, wait_for_stable; 79 in 7.6.1 with control_status) */
 export const TOOL_CATALOG: Record<string, ToolMeta> = {
   doctor: NONE_READ('core'),
   policy_status: NONE_READ('core'),
@@ -165,7 +165,8 @@ export const TOOL_CATALOG: Record<string, ToolMeta> = {
   list_running_apps: AX_READ('ax'),
   discover_applications: NONE_READ('core'),
   hide_app: AX_MUT('ax'),
-  unhide_app: AX_MUT('ax'),
+  // 7.6.1: prepare_display (on every input tool in `desktop`) hides apps; the profile that can hide must be able to restore.
+  unhide_app: AX_MUT('core'),
   get_display_size: NONE_READ('core'),
   list_displays: NONE_READ('core'),
   get_window: AX_READ('core'),
@@ -215,11 +216,13 @@ export const TOOL_CATALOG: Record<string, ToolMeta> = {
   wait_for_stable: NONE_READ('desktop', { idempotentHint: false }),
   set_target: NONE_READ('core', { idempotentHint: false }),
   get_target: NONE_READ('core'),
+  // 7.6.1: the person's pause/stop state (the desktop status card), readable by the model.
+  control_status: NONE_READ('core'),
 }
 
 /** v7.6 R7: the job of every tool (the instructions and get_tool_guide are organised by it). */
 const TOOL_JOBS: Record<ToolJob, readonly string[]> = {
-  meta: ['doctor', 'policy_status', 'get_tool_guide', 'get_tool_metadata', 'get_app_capabilities', 'discover_applications', 'set_target', 'get_target'],
+  meta: ['doctor', 'policy_status', 'get_tool_guide', 'get_tool_metadata', 'get_app_capabilities', 'discover_applications', 'set_target', 'get_target', 'control_status'],
   observe: ['screenshot', 'zoom', 'snapshot', 'read_window_text', 'list_windows', 'get_window', 'get_cursor_window', 'get_frontmost_app',
     'list_running_apps', 'get_display_size', 'list_displays', 'cursor_position', 'read_clipboard', 'wait', 'wait_for_window', 'wait_for_text', 'wait_for_stable'],
   act: ['click', 'left_click', 'right_click', 'middle_click', 'double_click', 'triple_click', 'click_text', 'mouse_move', 'left_click_drag', 'mouse_drag',

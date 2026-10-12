@@ -15,3 +15,4 @@ release-sbom.cdx.json
 
 showcase-output/
 .DS_Store
+agents/*/target/

@@ -11,7 +11,7 @@ import { withToolDefaults } from './registry/definitions.js'
 import { discoverApplications } from './session/application-discovery.js'
 import { okJson } from './result.js'
 import { loadNative, type NativeModule } from './native.js'
-import { MUTATING_TOOLS } from './tool-catalog.js'
+import { DEFAULT_PROFILE, MUTATING_TOOLS, getToolMeta } from './tool-catalog.js'
 import { sleep, sleepAbortable, defaultSpawnBounded } from './session/spawn.js'
 import type { SpawnBounded } from './session/spawn.js'
 import { FocusError, StructuredToolError, WindowNotFoundError } from './session/errors.js'
@@ -42,6 +42,7 @@ import { handleAgentDesktopTool } from './session/agent-desktop-handlers.js'
 import { createMacosHelper, type MacosHelper } from './session/macos-helper.js'
 import { defaultPidDeliveryPath, PidDeliveryStore } from './session/pid-delivery.js'
 import { createUserActivityGuard, type UserActivityGuard } from './session/user-activity.js'
+import { OperatorControl, defaultCardPresenter, describeAction, statusCardEnabled } from './session/operator-control.js'
 import {
   errJson,
   type ToolResult,
@@ -159,6 +160,12 @@ export interface SessionOptions {
   pidDeliveryStore?: PidDeliveryStore
   /** v7.5: the user-active guard. Defaults to one over the native physical-input clock. */
   userActivityGuard?: UserActivityGuard
+  /**
+   * 7.6.1: the operator control (pause, stop, the desktop status card). Defaults to a control with the platform's
+   * card when `COMPUTER_USE_STATUS_CARD=true` and the native module is real; otherwise the state machine alone.
+   * Tests inject one with a fake presenter.
+   */
+  operatorControl?: OperatorControl
 }
 
 const IS_WINDOWS = process.platform === 'win32'
@@ -174,7 +181,7 @@ export function createSession(opts: SessionOptions = {}): Session {
   const targetController = new TargetStateController(n)
   const visionEnabled = opts.vision !== false
   const elicitApproval = opts.elicitApproval
-  const activeProfile = opts.profile ?? process.env.COMPUTER_USE_PROFILE ?? 'full'
+  const activeProfile = opts.profile ?? process.env.COMPUTER_USE_PROFILE ?? DEFAULT_PROFILE
 
   // v5.2: cross-process lock + main-runloop pump. Mutating tool dispatch
   // acquires before running and releases in `finally`; observation tools
@@ -201,7 +208,15 @@ export function createSession(opts: SessionOptions = {}): Session {
   let closed = false
   let closeRequested = false
   let references = 0
-  const dispose = () => { if (closeRequested && references === 0) { closed = true; process.removeListener('exit', forceRelease) } }
+  const dispose = () => {
+    if (closeRequested && references === 0) {
+      closed = true
+      process.removeListener('exit', forceRelease)
+      // 7.6.1: apps hidden by prepare_display that the agent never restored come back when the session ends.
+      try { focus.restoreHidden() } catch { /* best effort */ }
+      try { control.close() } catch { /* the card is optional */ }
+    }
+  }
   const defaultProvider = opts.provider ?? process.env.COMPUTER_USE_PROVIDER ?? 'auto'
 
   // v7.5 agent desktop: OCR/capture helper, pid delivery records, user-active guard.
@@ -209,6 +224,9 @@ export function createSession(opts: SessionOptions = {}): Session {
     : opts.macosHelper ?? (process.platform === 'darwin' && opts.native == null ? createMacosHelper() : undefined)
   const pidStore = opts.pidDeliveryStore ?? new PidDeliveryStore(opts.native == null ? defaultPidDeliveryPath() : undefined)
   const userGuard = opts.userActivityGuard ?? createUserActivityGuard({ native: n })
+  // 7.6.1: the person's pause/stop state and the desktop status card.
+  const cardPresenter = opts.native == null && statusCardEnabled() ? defaultCardPresenter() : undefined
+  const control = opts.operatorControl ?? new OperatorControl({ native: n, ...(cardPresenter ? { card: { presenter: cardPresenter } } : {}) })
   // Start the native input monitor now: it counts its own start as input, so a
   // first reading taken at the first tool call would refuse that call.
   userGuard.activity()
@@ -277,6 +295,7 @@ export function createSession(opts: SessionOptions = {}): Session {
       policyStatus,
       auditEnabled,
       auditLogPath,
+      controlStatus: () => control.status(),
       agentDesktop: async () => {
         const availability = macosHelper ? await macosHelper.ensure() : null
         return {
@@ -336,6 +355,7 @@ export function createSession(opts: SessionOptions = {}): Session {
     // PR-10: elicitation before lock when approval required (K13 token already checked in evaluatePolicy)
     const requestElicitation = requestContext?.elicitApproval ?? elicitApproval
     if (!policyDecision.allowed && policyDecision.approval === 'required' && requestElicitation) {
+      control.waiting('approval')
       try {
         const approved = await requestElicitation({
           tool,
@@ -352,6 +372,8 @@ export function createSession(opts: SessionOptions = {}): Session {
           throw error
         }
         // treat as denied / timeout
+      } finally {
+        control.waiting(null)
       }
     }
 
@@ -428,7 +450,10 @@ export function createSession(opts: SessionOptions = {}): Session {
         guard: userGuard,
         ...(signal ? { signal } : {}),
       })
-      if (windowResult) return windowResult
+      if (windowResult) {
+        if (tool === 'unhide_app' && !windowResult.isError && typeof args.bundle_id === 'string') focus.forgetHidden(args.bundle_id)
+        return windowResult
+      }
       const agentDesktopResult = await handleAgentDesktopTool(tool, args, {
         native: n,
         targets: targetController,
@@ -447,6 +472,7 @@ export function createSession(opts: SessionOptions = {}): Session {
         runScript: runScriptHelper,
         getAppDictionary,
         pidDelivery: (bundleId: string) => pidStore.get(bundleId) ?? null,
+        input: inputHandler,
         ...(signal ? { signal } : {}),
       }
       const linuxResult = process.platform === 'linux' && !opts.native
@@ -473,6 +499,7 @@ export function createSession(opts: SessionOptions = {}): Session {
         runDoctor,
         policyStatus,
         pointer: virtualPointer,
+        controlStatus: () => control.status(),
       })
       if (coreResult) return coreResult
       return { content: [{ type: 'text', text: `Unknown tool: ${tool}` }], isError: true }
@@ -535,11 +562,39 @@ export function createSession(opts: SessionOptions = {}): Session {
     return result
   }
 
-  const coordinated: Session['dispatch'] = (tool, args, signal, progress, context) => {
-    if (closed) return Promise.reject(new Error('Session is closed'))
-    return MUTATING_TOOLS.has(tool) && !context?.preflight
-      ? coordinateDesktop(opts.lockPath ?? DEFAULT_SESSION_LOCK_PATH, () => dispatch(tool, args, signal, progress, context), signal)
-      : dispatch(tool, args, signal, progress, context)
+  /** The app and window a call is aimed at, as the policy and the target state resolve them, for the status card. */
+  const resolvedFor = (args: Record<string, unknown>): { app?: string; window?: string } => {
+    let app: string | undefined
+    try { app = targetController.targetAppForPolicy(args) } catch { /* unresolved */ }
+    const windowId = typeof args.window_id === 'number' ? args.window_id
+      : typeof args.target_window_id === 'number' ? args.target_window_id : targetController.current()?.windowId
+    let window: string | undefined
+    try { window = windowId !== undefined ? n.getWindow(windowId)?.title ?? undefined : undefined } catch { /* unresolved */ }
+    return { ...(app ? { app } : {}), ...(window ? { window } : {}) }
+  }
+
+  const coordinated: Session['dispatch'] = async (tool, args, signal, progress, context) => {
+    if (closed) throw new Error('Session is closed')
+    const mutates = MUTATING_TOOLS.has(tool) && !context?.preflight
+    // 7.6.1: the person's pause/stop state gates every mutation and aborts the one in flight.
+    if (mutates) {
+      const refusal = control.gate(tool)
+      if (refusal) return errJson(refusal)
+    }
+    const effective = mutates ? control.signal(signal) : signal
+    const tracked = !context?.preflight && getToolMeta(tool)?.job !== 'meta'
+    if (tracked) control.begin(describeAction(tool, args, resolvedFor(args)))
+    let outcome: 'done' | 'failed' = 'failed'
+    try {
+      const result = mutates
+        ? await coordinateDesktop(opts.lockPath ?? DEFAULT_SESSION_LOCK_PATH, () => dispatch(tool, args, effective, progress, context), effective)
+        : await dispatch(tool, args, effective, progress, context)
+      outcome = result.isError ? 'failed' : 'done'
+      if (tracked) control.waiting(result.isError && result.structuredContent?.error === 'user_active' ? 'user_active' : null)
+      return result
+    } finally {
+      if (tracked) control.finish(outcome)
+    }
   }
   return {
     dispatch: coordinated,

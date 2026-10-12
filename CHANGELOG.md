@@ -1,5 +1,75 @@
 # Changelog
 
+## v7.6.1 (2026-10-11)
+
+The 7.6.1 list from [the 2026-10-11 review](docs/reviews/2026-10-11-end-to-end-review.md) §7, tracked in
+[`docs/specs/v7.6.1-fixes/tasks.md`](docs/specs/v7.6.1-fixes/tasks.md), plus the first cross-platform desktop status card.
+
+### Added
+
+- **A desktop status card** (`COMPUTER_USE_STATUS_CARD=true`; opt-in in this release): a small always-on-top panel on macOS
+  (a Swift `NSPanel`, compiled on first use like the capture helper) and Windows (PowerShell and WPF, the lineage of
+  PR #40 by [@ShakeCrane](https://github.com/ShakeCrane)) that says an agent is driving the machine, how long for, what it
+  is doing (the tool, its key argument, the app and the window the server resolved; typed text is never shown) and the
+  last few actions, with **Pause / Resume** and **Stop**. Pause refuses new mutations with `paused_by_user` and aborts
+  the one in flight; reads keep working. Stop does the same for the rest of the session and trips the native
+  emergency-stop latch, so actuators stop mid-gesture. The card is excluded from screen capture on both platforms
+  (`sharingType = .none`, `WDA_EXCLUDEFROMCAPTURE`), so the agent never sees its own controls, and it watches the
+  server's pid, so a crashed server leaves nothing on screen. It also shows when the agent is waiting for the person to
+  stop typing (`user_active`) or for an approval.
+- **`control_status`** (core, read-only): the state the card drives (`running | paused | stopped`, since when, what the
+  agent is waiting on), for a model that just received `paused_by_user` or `stopped_by_user`. `doctor` reports
+  `status_card`; the instructions explain the two refusals.
+- `unhide_app` is in every profile (it was `ax` only), because `focus_strategy: "prepare_display"` on every input tool
+  in `desktop` could hide the person's apps with no tool to restore them. Apps still hidden when the session ends are
+  restored automatically. The default macOS list is 40 tools (36 on Windows and Linux).
+
+### Fixed
+
+- **`screenshot {full_screen: true}` now captures the screen.** It was advertised in 7.6.0 and never read; with a session
+  target set the call captured the target window.
+- **Unknown arguments are refused by name** (`invalid_arguments` with the nearest declared name) instead of being dropped
+  silently, which sent a `taget_app` typo's input to the wrong window. The click aliases keep accepting `click`'s
+  targeting; `approval_token`, `scroll.delta_x/delta_y`, `left_click_drag.path` and `filesystem.include_digest` stay
+  accepted as undeclared arguments.
+- **The `click_element` coordinate fallback goes through the input handler**, so the user-active guard and coordinate
+  validation apply to it; it used to post a real click past both.
+- **Sensitive-label redaction matches whole words.** "Shipping address", "Compass", "Pinned tabs", "Opinion" and
+  "Passport number" keep their values; passwords, PINs, one-time codes and secure fields are still blanked. The audit
+  redactor no longer treats `shipping_address` as a PIN.
+- `scroll` (HID path), `left_mouse_down`, `left_mouse_up`, `multi_select` and `multi_edit` validate coordinates like
+  `click`.
+- **Actions that did nothing are errors:** `open_application` with `activated: false` (`activation_failed` with a
+  reason), `hide_app` and `unhide_app` with no such app (`app_not_found`), `activate_window` with no such window or
+  one that did not come to the front (`activation_failed`).
+- macOS `activate_window` polls the frontmost process until the timeout and reports `not_frontmost` when the raise did
+  not take; it used to report `activated: true` whatever happened. Windows `write_clipboard` reports a failed
+  `SetClipboardData` instead of leaving the clipboard empty and saying "Written"; Windows UIA `click_element` and
+  `press_button` report a failed `Invoke`/`Toggle` instead of `performed: true`.
+- The Swift capture helper compiles without the first caller's abort signal, so a cancelled first OCR call no longer
+  caches "swiftc failed" for ten minutes.
+- Windows `get_app_capabilities` reports `accessibility: { nodes, hasControls }` like macOS; `click_text` refreshes the
+  desktop resources like the other actions; a session created without a profile reasons about `desktop`, not `full`;
+  the instructions honour the registry's platform.
+- **The run console host validates Host and Origin on every route** (they covered `/mcp` only), requires
+  `application/json` on POST bodies and caps them, sends `frame-ancestors 'none'` and `nosniff`, and the page accepts
+  `postMessage` only from its own iframe. Any web page the person had open could capture the screen through `/driver`
+  or append a "user" turn through `/rpc`.
+- **`run_say` no longer takes a `role`**: the model could pass `"user"` and plant an instruction the next turn would
+  obey as the person's. User turns come only from the console page.
+- The instructions and the skill say what results verify today: pid deliveries report a verification; every other action
+  result says what was sent, not what happened. They used to describe the unshipped `effect` field.
+
+### Changed
+
+- `package.json` ships `dist/` as a directory. The hand-written list of modules left PR #40's new module out of the
+  tarball while every test job stayed green; a packaging test now asserts every runtime import inside `dist` resolves.
+- The release workflow skips with a warning when the version is already staged and awaiting approval (it failed with
+  E409 and the next push staged the same version twice).
+- The Linux CI test job runs the input smoke test under Xvfb with `xdotool`, `wmctrl` and `xclip` installed. It used to
+  pass with no X server because the native layer returned silently; coordinate validation now needs a display, so the
+  clicks are real.
+
 ## v7.6.0 (2026-10-09)
 
 The design pass and the defect fixes from the 2026-10-09 reviews

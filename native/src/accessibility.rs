@@ -429,17 +429,30 @@ mod platform {
                 }
             }
             if action == "AXPress" {
+                // 7.6.1: a failed Invoke or Toggle used to be reported as performed.
                 if let Ok(inv) =
                     elem.GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
                 {
-                    let _ = inv.Invoke();
-                    return Ok(serde_json::json!({"performed": true}));
+                    return Ok(match inv.Invoke() {
+                        Ok(()) => serde_json::json!({"performed": true}),
+                        Err(error) => serde_json::json!({
+                            "performed": false,
+                            "reason": "invoke_failed",
+                            "detail": error.to_string(),
+                        }),
+                    });
                 }
                 if let Ok(tog) =
                     elem.GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
                 {
-                    let _ = tog.Toggle();
-                    return Ok(serde_json::json!({"performed": true}));
+                    return Ok(match tog.Toggle() {
+                        Ok(()) => serde_json::json!({"performed": true}),
+                        Err(error) => serde_json::json!({
+                            "performed": false,
+                            "reason": "toggle_failed",
+                            "detail": error.to_string(),
+                        }),
+                    });
                 }
                 let rect = elem.CurrentBoundingRectangle().unwrap_or_default();
                 return Ok(serde_json::json!({

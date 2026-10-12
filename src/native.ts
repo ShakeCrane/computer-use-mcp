@@ -89,10 +89,12 @@ export function resolveAddonPath(options: AddonResolverOptions = {}): string {
   attempts.push(generic)
   if (existsSync(generic)) return generic
 
+  // 7.6.1: the per-platform packages (@zavora-ai/computer-use-mcp-<platform>-<arch>) are not published yet (issue #36),
+  // so the message no longer tells users to install them; the resolver still honours one when it is installed.
   throw new Error(
     `Native binary missing for ${platform}-${arch}. ` +
-    `Install @zavora-ai/computer-use-mcp-${platform}-${arch} at the matching version, ` +
-    `rebuild via \`npm run build:native\`, or set COMPUTER_USE_NATIVE_PATH to an explicit .node path. ` +
+    `Reinstall @zavora-ai/computer-use-mcp (the tarball bundles every platform binary), ` +
+    `rebuild via \`npm run build:native\` in a checkout, or set COMPUTER_USE_NATIVE_PATH to an explicit .node path. ` +
     `Tried: ${attempts.join(', ')}.`,
   )
 }

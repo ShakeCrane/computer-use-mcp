@@ -9,12 +9,15 @@ export async function handleCoreTool(
     runDoctor(includeRemediation: boolean): Promise<Record<string, unknown>>
     policyStatus(): Record<string, unknown>
     pointer: VirtualPointerController
+    /** 7.6.1: the operator control state (pause, stop, the status card). */
+    controlStatus?(): Record<string, unknown>
   },
 ): Promise<ToolResult | undefined> {
   if (tool === 'doctor') {
     return okJson(await context.runDoctor(args.include_remediation !== false))
   }
   if (tool === 'policy_status') return okJson(context.policyStatus())
+  if (tool === 'control_status') return okJson(context.controlStatus?.() ?? { state: 'running', reason: null, card: { enabled: false, presenter: 'none', launched: false } })
   if (tool !== 'agent_pointer') return undefined
   if (typeof args.action !== 'string') throw new Error('Invalid action: expected string')
   const action = args.action

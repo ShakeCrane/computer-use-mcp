@@ -7,12 +7,14 @@ agents/
 ├── claude-agent/        JavaScript agent using Anthropic Claude
 ├── deepseek-agent/      JavaScript vision agent using DeepSeek Flash
 ├── openai-agent/        JavaScript agent using OpenAI Responses
-└── langchain-agent/     JavaScript agent using LangChain + Claude
+├── langchain-agent/     JavaScript agent using LangChain + Claude
+└── adk-anthropic-agent/ Rust agent on ADK-Rust + Claude, with the desktop status card on (7.6.1)
 ```
 
 ## Quick Start
 
-These JavaScript agents use the in-process MCP server — no separate process needed.
+These JavaScript agents use the in-process MCP server — no separate process needed. The Rust agent starts the
+server as a child over stdio with the status card on; see [`adk-anthropic-agent/README.md`](adk-anthropic-agent/README.md).
 
 ### Claude Agent
 ```bash

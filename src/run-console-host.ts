@@ -99,6 +99,8 @@ async function callTool(name, args) {
 
 // Host side of the MCP Apps handshake.
 window.addEventListener('message', async event => {
+  // 7.6.1: only the app iframe may talk to this host; anything else (an embedding page, an extension) is ignored.
+  if (event.source !== frame.contentWindow) return
   const message = event.data
   if (!message || message.jsonrpc !== '2.0') return
   const reply = payload => frame.contentWindow.postMessage({ jsonrpc: '2.0', id: message.id, ...payload }, '*')
@@ -273,13 +275,43 @@ export async function serve({
     response.end(JSON.stringify(body))
   }
   const html = (response: ServerResponse, body: string): void => {
-    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    response.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      // 7.6.1: the page may not be embedded by another origin, so an attacker page cannot drive it by postMessage.
+      'Content-Security-Policy': "frame-ancestors 'none'",
+      'X-Content-Type-Options': 'nosniff',
+    })
     response.end(body)
   }
-  const readBody = async (request: IncomingMessage): Promise<Record<string, unknown>> => {
+  /**
+   * 7.6.1: a POST body must say it is JSON and must be bounded. A `text/plain` POST is a CORS "simple request" that any
+   * web page can send to 127.0.0.1 without a preflight; requiring `application/json` makes the browser preflight it,
+   * and the Origin check below refuses it. The cap is above the largest legitimate body (a 12 MiB attachment as base64).
+   */
+  const MAX_BODY_BYTES = 20 * 1024 * 1024
+  const readBody = async (request: IncomingMessage, response: ServerResponse): Promise<Record<string, unknown> | undefined> => {
+    const type = (request.headers['content-type'] ?? '').split(';', 1)[0].trim().toLowerCase()
+    if (type !== 'application/json') {
+      json(response, { error: 'Content-Type must be application/json' }, 415)
+      return undefined
+    }
     const chunks: Buffer[] = []
-    for await (const chunk of request) chunks.push(chunk as Buffer)
-    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
+    let total = 0
+    for await (const chunk of request) {
+      total += (chunk as Buffer).byteLength
+      if (total > MAX_BODY_BYTES) {
+        json(response, { error: `Body exceeds ${MAX_BODY_BYTES} bytes` }, 413)
+        request.destroy()
+        return undefined
+      }
+      chunks.push(chunk as Buffer)
+    }
+    try {
+      return JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
+    } catch {
+      json(response, { error: 'Body is not valid JSON' }, 400)
+      return undefined
+    }
   }
 
   /**
@@ -315,7 +347,14 @@ export async function serve({
         onLog(`run ${currentRunId} opened: ${said.slice(0, 72)}`)
       } else {
         onLog(`ask: ${said.slice(0, 72)}`)
-        result = await client.callTool('run_say', { runId: currentRunId, text: said, role: 'user' }) as ToolResult
+        // 7.6.1: run_say no longer takes a role (the model could pass "user" and plant an instruction). The page is
+        // the person, so its words go into the store as a user turn directly.
+        try {
+          store.say(currentRunId, 'user', said)
+          result = await client.callTool('run_console', { runId: currentRunId }) as ToolResult
+        } catch (error) {
+          result = { isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }] }
+        }
       }
       // Attach after the turn exists, so an image can ride along with the very
       // first sentence instead of dangling off an empty second turn.
@@ -344,8 +383,11 @@ export async function serve({
     void (async () => {
       try {
         const url = (request.url ?? '/').split('?')[0]
+        // 7.6.1: every route, not only /mcp. Without this a page the person has open could capture the screen through
+        // /driver, append a "user" turn through /rpc, read the transcript, or cancel the run (DNS rebinding reaches
+        // the same routes with a same-origin fetch).
+        if (!validateHost(request, response) || !validateOrigin(request, response)) return
         if (url === '/mcp') {
-          if (!validateHost(request, response) || !validateOrigin(request, response)) return
           await handleMcp(request, response)
           return
         }
@@ -368,6 +410,7 @@ export async function serve({
               'Content-Type': attachment.mimeType,
               'Content-Length': bytes.byteLength,
               'Cache-Control': 'no-store',
+              'X-Content-Type-Options': 'nosniff',
             })
             return void response.end(bytes)
           } catch {
@@ -375,7 +418,8 @@ export async function serve({
           }
         }
         if (request.method === 'POST' && url === '/rpc') {
-          const body = await readBody(request)
+          const body = await readBody(request, response)
+          if (!body) return
           const result = await callForPage(
             String(body.name ?? ''),
             (body.arguments ?? {}) as Record<string, unknown>,
@@ -392,7 +436,8 @@ export async function serve({
          * observation, not something an agent should be able to shape.
          */
         if (request.method === 'POST' && url === '/driver/activity') {
-          const body = await readBody(request)
+          const body = await readBody(request, response)
+          if (!body) return
           if (!currentRunId) return json(response, { recorded: 0 }, 409)
           const events = Array.isArray(body.events) ? body.events : []
           store.record(currentRunId, events as Parameters<RunStore['record']>[1])
@@ -407,7 +452,8 @@ export async function serve({
         // driver so an operator can set it once, and so a run started without one
         // still shows token counts instead of nothing.
         if (request.method === 'POST' && url === '/driver/usage') {
-          const body = await readBody(request)
+          const body = await readBody(request, response)
+          if (!body) return
           if (!currentRunId) return json(response, { isError: true, content: [{ type: 'text', text: 'No run yet' }] }, 409)
           const rate = (name: string): number | undefined => {
             const raw = process.env[name]
@@ -427,7 +473,8 @@ export async function serve({
           }))
         }
         if (request.method === 'POST' && url === '/driver') {
-          const body = await readBody(request)
+          const body = await readBody(request, response)
+          if (!body) return
           if (!currentRunId) return json(response, { isError: true, content: [{ type: 'text', text: 'No run yet' }] }, 409)
           return json(response, await client.callTool('run_progress', { ...body, runId: currentRunId }))
         }

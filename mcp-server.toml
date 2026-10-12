@@ -1,6 +1,6 @@
 server_id = "computer_use_mcp"
 display_name = "Computer Use"
-version = "7.6.0"
+version = "7.6.1"
 domain = "desktop-automation"
 sdk_version = "2.0.0"
 risk_level = "high"
@@ -554,6 +554,13 @@ credential_bindings = []
 [[tools]]
 name = "wait_for_stable"
 description = "Wait until a window stops changing"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "control_status"
+description = "Whether the person has paused or stopped the agent from the desktop status card"
 risk_class = "read_only"
 requires_approval = false
 credential_bindings = []

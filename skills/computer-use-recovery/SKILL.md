@@ -13,7 +13,7 @@ When a mutating tool returns `focus_failed` or similar:
 | `unhide_app` | `unhide_app` → wait → `activate_window` → retry |
 | `open_application` | `open_application` → wait (`wait_for_window` for the app) → retry |
 
-If a third-party app steals focus after activation, retry once with `focus_strategy: "prepare_display"`, then `unhide_app` for any `hiddenBundleIds` when done.
+If a third-party app steals focus after activation, retry once with `focus_strategy: "prepare_display"`, then `unhide_app` for any `hiddenBundleIds` when done (`unhide_app` is in every profile since 7.6.1; apps still hidden when the session ends are restored automatically).
 
 Always re-resolve `window_id` via `list_windows` if the target window may have moved or closed. `get_target` shows the session target set by `set_target` and whether its window is still on screen; call `set_target` again after a window is replaced.
 

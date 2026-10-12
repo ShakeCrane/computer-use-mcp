@@ -19,6 +19,12 @@ export interface FocusController {
     options?: { tool?: string; force?: boolean },
   ): Promise<{ hiddenBundleIds?: string[] }>
   hiddenBundleIds(): string[] | undefined
+  /** 7.6.1: apps hidden by prepare_display in this session that nothing has unhidden since. */
+  stillHidden(): string[]
+  /** 7.6.1: the agent (or a person) unhid an app; stop tracking it. */
+  forgetHidden(bundleId: string): void
+  /** 7.6.1: unhide everything prepare_display hid and nothing restored; called when the session closes. */
+  restoreHidden(): string[]
 }
 
 function defaultStrategy(tool: string): FocusStrategy {
@@ -40,6 +46,7 @@ export function createFocusController(options: {
   const platform = options.platform ?? process.platform
   const env = options.env ?? process.env
   let dispatchHiddenBundleIds: string[] | undefined
+  const hiddenByPrepare = new Set<string>()
 
   const keepVisibleBundles = (): string[] => {
     if (env.COMPUTER_USE_PREPARE_KEEP_VISIBLE) {
@@ -101,6 +108,7 @@ export function createFocusController(options: {
       if (strategy === 'prepare_display') {
         hiddenBundleIds = native.prepareDisplay(target.bundleId, keepVisibleBundles()).hiddenBundleIds
         dispatchHiddenBundleIds = hiddenBundleIds
+        for (const id of hiddenBundleIds ?? []) hiddenByPrepare.add(id)
         await options.sleep(50)
       }
 
@@ -137,6 +145,16 @@ export function createFocusController(options: {
     },
     hiddenBundleIds() {
       return dispatchHiddenBundleIds ? [...dispatchHiddenBundleIds] : undefined
+    },
+    stillHidden() { return [...hiddenByPrepare] },
+    forgetHidden(bundleId) { hiddenByPrepare.delete(bundleId) },
+    restoreHidden() {
+      const restored: string[] = []
+      for (const id of [...hiddenByPrepare]) {
+        try { if (native.unhideApp(id)) restored.push(id) } catch { /* best effort: the app may have quit */ }
+        hiddenByPrepare.delete(id)
+      }
+      return restored
     },
   }
 }

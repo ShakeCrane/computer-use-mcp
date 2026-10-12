@@ -10,8 +10,9 @@ after it note where a 7.2 figure is superseded.
   `COMPUTER_USE_PROFILE` (the bound, default `desktop`) and exists on the running platform (`platforms` in the catalog).
   A tool that fails either test is neither listed nor callable. Profiles nest: `core` is inside `desktop`, which is
   inside `ax`, `scripting` and `windows-admin`, all inside `full`.
-- **Sizes.** The catalog has 78 tools. On macOS the default `desktop` profile lists 39 (45,942 bytes of `tools/list` on the
-  wire, about 12k tokens) and `full` lists 76 (84,037 bytes, down from 112,727 before 7.6); Windows lists 35 and 74, Linux 35
+- **Sizes.** The catalog has 79 tools (7.6.1 added `control_status`). On macOS the default `desktop` profile lists 40 (since 7.6.1, when `unhide_app`
+  joined `core`; 39 in 7.6.0) at about 44 KB of `tools/list` as the client receives it (about 12k tokens), and `full` lists
+  76 (about 79 KB, down from 112,727 bytes before 7.6); Windows lists 36 and 74, Linux 36
   and 66. Byte budgets (`desktop` 48,000, `full` 88,000) are tests on the real transport. Every tool has a `job`
   (`observe`, `act`, `semantic`, `script`, `admin`, `browser`, `spaces`, `meta`); the instructions and `get_tool_guide` are
   organised by it, and profiles remain the permission tiers.

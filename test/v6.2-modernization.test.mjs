@@ -33,10 +33,10 @@ function createMockNative() {
   }
 }
 
-test('catalog has 78 tools and MUTATING_TOOLS matches mutates flag', () => {
+test('catalog has 79 tools and MUTATING_TOOLS matches mutates flag', () => {
   const names = Object.keys(TOOL_CATALOG)
   // 73 in v7.5; v7.6 added click, set_target, get_target, wait_for_text and wait_for_stable
-  assert.equal(names.length, 78, `expected 78 tools, got ${names.length}`)
+  assert.equal(names.length, 79, `expected 79 tools (7.6.1 added control_status), got ${names.length}`)
   for (const [name, meta] of Object.entries(TOOL_CATALOG)) {
     assert.equal(MUTATING_TOOLS.has(name), meta.mutates, `${name}: MUTATING_TOOLS vs mutates mismatch`)
   }

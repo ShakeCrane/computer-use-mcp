@@ -227,8 +227,11 @@ export function createLegacyPolicyRuntime(options: {
 
   const redactAuditValue = (key: string, value: unknown): unknown => {
     const lower = key.toLowerCase()
+    // 7.6.1: whole tokens for the short names (pin, otp), so `shipping_address` is not redacted as "pin".
+    const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean)
     if (lower.includes('token') || lower.includes('password') || lower.includes('secret')
-      || /api[_-]?key|authorization|credential|passcode|pin|otp/.test(lower)
+      || /api[_-]?key|authorization|credential/.test(lower)
+      || tokens.some(token => token === 'passcode' || token === 'pin' || token === 'otp')
       || ['text', 'content', 'script', 'value', 'message'].includes(lower)) {
       return { redacted: true }
     }

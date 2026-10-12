@@ -32,6 +32,9 @@ const withDelivery = (schema: Record<string, ZodTypeAny>) => ({
   delivery: deliveryParam,
 })
 
+/** 7.6.1: the click aliases accept click's targeting without advertising it (their schemas stay a line each). */
+export const ALIAS_TARGETING_ARGS = ['target_app', 'target_window_id', 'target_title', 'focus_strategy', 'force', 'delivery'] as const
+
 const PROVIDERS = ['anthropic', 'openai', 'openai-low', 'gemini', 'llama', 'grok', 'mistral', 'qwen', 'nova', 'deepseek-vl', 'deepseek-flash', 'phi', 'auto'] as const
 
 /** Complete v7 compatibility surface, defined independently of MCP transport setup. */
@@ -46,6 +49,7 @@ export function defineV7Tools(registry: Pick<ToolRegistry, 'define' | 'getMeta'>
     desc: string,
     schema: Record<string, ZodTypeAny>,
     _legacyCategoryMeta: ToolMeta,
+    extra: { undeclaredArgs?: readonly string[] } = {},
   ) => {
     const meta = getToolMeta(name)
     if (!meta) throw new Error(`tool "${name}" missing from TOOL_CATALOG`)
@@ -54,6 +58,7 @@ export function defineV7Tools(registry: Pick<ToolRegistry, 'define' | 'getMeta'>
       description: desc,
       inputSchema: schema,
       meta,
+      ...(extra.undeclaredArgs ? { undeclaredArgs: extra.undeclaredArgs } : {}),
     })
   }
 
@@ -99,7 +104,7 @@ export function defineV7Tools(registry: Pick<ToolRegistry, 'define' | 'getMeta'>
       .describe('Image quality. 1-100 = JPEG quality. 0 = PNG (lossless). Default: 80 (JPEG).'),
     full_screen: z.boolean().optional().describe('Capture the whole screen even when a session target is set.'),
     target_app: z.string().optional()
-      .describe('Bundle ID of app to capture: its main window (largest titled window). Omit for full screen.'),
+      .describe('Bundle ID of app to capture: its main window (largest titled window).'),
     target_window_id: targetWindowIdParam,
     target_title: targetTitleParam,
     provider: z.enum(PROVIDERS).optional()
@@ -124,16 +129,17 @@ export function defineV7Tools(registry: Pick<ToolRegistry, 'define' | 'getMeta'>
   }), CG_MUT)
   // v7.6 R7: the v7 click variants stay callable as thin aliases of click (the registry parses with passthrough, so
   // target_app, target_window_id, delivery and force still work on them); they cost a line each in the list.
-  tool('left_click', 'Alias of click (button left, count 1). Prefer click.', coord, CG_MUT)
-  tool('right_click', 'Alias of click (button right). Prefer click.', coord, CG_MUT)
-  tool('middle_click', 'Alias of click (button middle). Prefer click.', coord, CG_MUT)
-  tool('double_click', 'Alias of click (count 2). Prefer click.', coord, CG_MUT)
-  tool('triple_click', 'Alias of click (count 3). Prefer click.', coord, CG_MUT)
+  const alias = { undeclaredArgs: ALIAS_TARGETING_ARGS }
+  tool('left_click', 'Alias of click (button left, count 1). Prefer click.', coord, CG_MUT, alias)
+  tool('right_click', 'Alias of click (button right). Prefer click.', coord, CG_MUT, alias)
+  tool('middle_click', 'Alias of click (button middle). Prefer click.', coord, CG_MUT, alias)
+  tool('double_click', 'Alias of click (count 2). Prefer click.', coord, CG_MUT, alias)
+  tool('triple_click', 'Alias of click (count 3). Prefer click.', coord, CG_MUT, alias)
   tool('mouse_move', 'Move OS cursor to coordinates (last resort — prefer agent_pointer for non-interrupting pointer). Requires target frontmost for subsequent clicks.', withTargeting(coord), CG_MUT)
   tool('left_click_drag', 'Click and drag', withTargeting({
     coordinate: numArray(2),
     start_coordinate: numArray(2).optional(),
-  }), CG_MUT)
+  }), CG_MUT, { undeclaredArgs: ['path'] })
   tool('mouse_drag',
     'Drag with a chosen button while holding modifiers, through a path of waypoints. Needed by applications that draw their own UI and have no accessible controls: middle-button drag orbits a 3D viewport, shift+middle pans, ctrl+middle zooms. Motion is interpolated so applications that track incremental movement respond correctly.',
     withTargeting({
@@ -159,7 +165,7 @@ export function defineV7Tools(registry: Pick<ToolRegistry, 'define' | 'getMeta'>
     force: forceParam,
     target_title: targetTitleParam,
     delivery: deliveryParam,
-  }, CG_MUT)
+  }, CG_MUT, { undeclaredArgs: ['delta_x', 'delta_y'] })
   tool('type', 'Type text into the focused app. For form fields, prefer set_value or fill_form — accessibility-based writes are more reliable and need no click-to-focus. mode "keys" sends real key events, for apps that bind keys (a game console on the grave/tilde key).', {
     text: z.string(),
     mode: z.enum(['text', 'keys']).optional().describe('text (default): Unicode text, pasted when long or multi-line. keys: each character as the key-down/up of its virtual key (with shift as needed), never pasted'),
@@ -386,6 +392,7 @@ export function defineV7Tools(registry: Pick<ToolRegistry, 'define' | 'getMeta'>
     clear: z.boolean().optional().default(false),
   }, NONE_READ)
   tool('get_target', 'Show the session target window (set by set_target or by the last activation, click or keystroke) and whether it is still on screen.', {}, NONE_READ)
+  tool('control_status', 'Whether the person has paused or stopped the agent from the desktop status card (state running | paused | stopped, since when, what the agent is waiting on). Read-only. Call it after a mutating tool returns paused_by_user or stopped_by_user.', {}, NONE_READ)
 
   // ── v5: Agent Spaces ────────────────────────────────────────────────────
   // macOS Space mutation uses best-effort backends selected by
@@ -440,7 +447,7 @@ export function defineV7Tools(registry: Pick<ToolRegistry, 'define' | 'getMeta'>
       limit: z.number().int().optional().describe('Line limit for read'),
       encoding: z.string().optional().default('utf-8').describe('File encoding'),
       show_hidden: z.boolean().optional().default(false).describe('Show hidden files in list'),
-    }, NONE_MUT)
+    }, NONE_MUT, { undeclaredArgs: ['include_digest'] })
 
   // Process tool — list and kill processes
   tool('process_kill',

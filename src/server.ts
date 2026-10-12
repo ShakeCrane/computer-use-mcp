@@ -25,7 +25,7 @@ import {
 } from '@modelcontextprotocol/server'
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { createSession, type Session, type SessionOptions } from './session.js'
-import { parseProfile, type FocusRequired, type ToolMeta, type ProfileName } from './tool-catalog.js'
+import { MUTATING_TOOLS, parseProfile, type FocusRequired, type ToolMeta, type ProfileName } from './tool-catalog.js'
 import { buildInstructions } from './instructions.js'
 import { registerPrompts } from './prompts.js'
 import { registerResources, authorizeResourceAccess } from './resources.js'
@@ -53,15 +53,10 @@ const FIXED_RESOURCES = new Set([
   'computer://screenshot/latest',
 ])
 
-const DESKTOP_STATE_MUTATIONS = new Set([
-  'openai_computer', 'click', 'left_click', 'right_click', 'middle_click', 'double_click',
-  'triple_click', 'mouse_move', 'left_click_drag', 'mouse_drag', 'left_mouse_down', 'left_mouse_up',
-  'scroll', 'type', 'key', 'hold_key', 'open_application', 'hide_app', 'unhide_app',
-  'activate_app', 'activate_window', 'resize_window', 'click_element', 'set_value',
-  'press_button', 'select_menu_item', 'fill_form', 'run_script', 'create_agent_space',
-  'move_window_to_space', 'remove_window_from_space', 'destroy_space', 'process_kill',
-  'multi_select', 'multi_edit',
-])
+// 7.6.1: derived from the catalog so a new mutating tool (click_text was missing) refreshes the desktop resources.
+// Mutations that change no window or focus state are excluded.
+const NON_DESKTOP_MUTATIONS = new Set(['write_clipboard', 'agent_pointer', 'filesystem', 'registry', 'notification'])
+const DESKTOP_STATE_MUTATIONS = new Set([...MUTATING_TOOLS].filter(name => !NON_DESKTOP_MUTATIONS.has(name)))
 
 const requestStateKey = process.env.COMPUTER_USE_REQUEST_STATE_SECRET
   ? createHash('sha256').update(process.env.COMPUTER_USE_REQUEST_STATE_SECRET).digest()
@@ -118,7 +113,7 @@ export interface ServerOptions extends SessionOptions {
    * tests. Left unset, each server owns a session and closes it on disconnect.
    */
   session?: Session
-  /** Init-time maximum tool profile. Default full. */
+  /** Init-time maximum tool profile. Default `desktop` since 7.6. */
   profile?: ProfileName | string
   /** Initially visible subset within `profile`; hosts may change it through `onRegistry`. */
   activeProfile?: ProfileName | string
@@ -174,7 +169,7 @@ export function createComputerUseServer(opts: ServerOptions = {}): McpServer {
   const server = new McpServer(
     SERVER_INFO,
     {
-      instructions: buildInstructions(process.platform, activeProfile),
+      instructions: buildInstructions(opts.platform ?? process.platform, activeProfile),
       capabilities: {
         logging: {},
         resources: { subscribe: true },
@@ -405,7 +400,7 @@ const TASK_PROTOCOL_METHODS = new Set(['tasks/get', 'tasks/update', 'tasks/cance
 const SERVER_INFO = {
   name: 'computer-use',
   title: 'Computer Use MCP',
-  version: '7.6.0',
+  version: '7.6.1',
   description: 'Cross-platform desktop control with policy-aware automation.',
   websiteUrl: 'https://github.com/zavora-ai/computer-use-mcp',
 }

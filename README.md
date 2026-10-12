@@ -140,8 +140,9 @@ prompts are normal setup requirements. Downloads is not guaranteed to bypass tho
 | Use app scripting | AppleScript/JXA on macOS and PowerShell on Windows. |
 | Manage desktop work | Target individual windows, switch focus, read/write the clipboard and inspect displays. |
 | Build agent hosts | Add persistent desktop sessions, verified workflows, an MCP App console, isolated browser contexts and supervised runtimes. |
+| Stay in control | A desktop status card (`COMPUTER_USE_STATUS_CARD=true`, macOS and Windows) shows what the agent is doing with Pause and Stop; it never appears in the agent's screenshots. |
 
-The default profile, **`desktop`**, exposes 39 tools on macOS: observation,
+The default profile, **`desktop`**, exposes 40 tools on macOS: observation,
 coordinates, OCR for apps that draw their own UI, waits and the session target.
 Set `COMPUTER_USE_PROFILE=full` for every tool (76 on macOS), or `core`, `ax`,
 `scripting` and `windows-admin` for other bounds. Tools that don't exist on your
@@ -231,9 +232,10 @@ browser fixture. These live checks need their documented platform prerequisites.
 
 ## Documentation and support
 
+- [v7.6.1 release notes](docs/releases/v7.6.1.md): the review fixes and the desktop status card
 - [v7.6.0 release notes](docs/releases/v7.6.0.md) (includes 7.5.0: [its notes](docs/releases/v7.5.0.md))
 - [v7.4.0 release notes and rollout checklist](docs/releases/v7.4.0.md)
-- [Reviews](docs/reviews/): the 2026-10-09 review and design pass behind 7.6.0
+- [Reviews](docs/reviews/): the 2026-10-09 review and design pass behind 7.6.0, and the 2026-10-11 three-pass review behind 7.6.1
 - [Tool usage and agent setup](AGENTS.md)
 - [Architecture and platform support](docs/ARCHITECTURE.md)
 - [Sessions, Tasks, browser isolation and supervision](docs/STRATEGY.md)

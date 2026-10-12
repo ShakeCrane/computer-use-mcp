@@ -1,5 +1,5 @@
 import type { NativeModule } from '../native.js'
-import { ok, okJson, okJsonWrappedArray, platformUnsupported, type ToolResult } from '../result.js'
+import { errJson, ok, okJson, okJsonWrappedArray, platformUnsupported, type ToolResult } from '../result.js'
 import { PROVIDER_WIDTH } from './constants.js'
 import type { SpawnResult } from './spawn.js'
 import type { TargetStateController } from './target-state.js'
@@ -113,11 +113,13 @@ export async function handleWindowTool(
     if (windowId < 0) throw new Error('Invalid window_id: expected number')
     const timeoutMs = typeof args.timeout_ms === 'number' ? args.timeout_ms : undefined
     const window = native.getWindow(windowId)
-    if (!window) return ok(JSON.stringify({
-      windowId, activated: false,
+    // 7.6.1: an action that did nothing is an error, not prose.
+    if (!window) return errJson({
+      error: 'window_not_found', windowId, activated: false,
       frontmostAfter: native.getFrontmostApp()?.bundleId ?? null,
       reason: 'window_not_found',
-    }))
+      remediation: ['list_windows to find a current window id; the window may have closed.'],
+    })
     const bundleId = window.bundleId
     guardActivation(bundleId, `raise window ${windowId}${bundleId ? ` of ${bundleId}` : ''}`)
     if (bundleId) {
@@ -131,12 +133,13 @@ export async function handleWindowTool(
     const result = native.activateWindow(windowId, timeoutMs)
     await context.sleep(80)
     if (result.activated && bundleId) targets.update({ bundleId, windowId }, 'activation')
-    return ok(JSON.stringify({
+    const payload = {
       windowId,
       activated: result.activated,
       frontmostAfter: native.getFrontmostApp()?.bundleId ?? null,
       reason: result.reason,
-    }))
+    }
+    return result.activated ? okJson(payload) : errJson({ error: 'activation_failed', ...payload })
   }
 
   if (tool === 'open_application') {
@@ -145,7 +148,19 @@ export async function handleWindowTool(
     const result = native.activateApp(bundleId, 3_000)
     if (result.activated) targets.update({ bundleId }, 'activation')
     await context.sleep(300)
-    return ok(`Opened ${bundleId} (activated: ${result.activated})`)
+    if (!result.activated) {
+      // 7.6.1: "Opened X (activated: false)" was a success result for an action that did nothing.
+      const running = native.listRunningApps().find(app => app.bundleId === bundleId)
+      return errJson({
+        error: 'activation_failed', bundle_id: bundleId, activated: false,
+        reason: (result as { reason?: string }).reason ?? (!running ? 'not_running' : running.isHidden ? 'hidden' : 'timeout'),
+        frontmostAfter: native.getFrontmostApp()?.bundleId ?? null,
+        remediation: [!running
+          ? 'The app is not running and could not be launched; check the bundle id with discover_applications.'
+          : 'Use activate_app for diagnostics, unhide_app if it is hidden, or wait_for_window for its window.'],
+      })
+    }
+    return ok(`Opened ${bundleId} (activated: true)`)
   }
   if (tool === 'get_frontmost_app') return okJson({ app: native.getFrontmostApp() ?? null })
   if (tool === 'list_windows') {
@@ -156,8 +171,13 @@ export async function handleWindowTool(
     )
   }
   if (tool === 'list_running_apps') return ok(JSON.stringify(native.listRunningApps()))
-  if (tool === 'hide_app') return ok(native.hideApp(stringArg(args, 'bundle_id')) ? 'Hidden' : 'App not found')
-  if (tool === 'unhide_app') return ok(native.unhideApp(stringArg(args, 'bundle_id')) ? 'Unhidden' : 'App not found')
+  if (tool === 'hide_app' || tool === 'unhide_app') {
+    const bundleId = stringArg(args, 'bundle_id')
+    const done = tool === 'hide_app' ? native.hideApp(bundleId) : native.unhideApp(bundleId)
+    // 7.6.1: "App not found" used to be a success result.
+    return done ? ok(tool === 'hide_app' ? 'Hidden' : 'Unhidden')
+      : errJson({ error: 'app_not_found', bundle_id: bundleId, remediation: ['list_running_apps or discover_applications to find the running app\'s id.'] })
+  }
   if (tool === 'get_display_size') {
     return okJson(native.getDisplaySize(
       typeof args.display_id === 'number' ? args.display_id : undefined,

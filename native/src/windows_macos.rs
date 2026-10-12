@@ -390,7 +390,7 @@ pub fn get_cursor_window() -> napi::Result<serde_json::Value> {
 /// 4. AXUIElementPerformAction(kAXRaiseAction)
 #[napi]
 pub fn activate_window(window_id: u32, timeout_ms: Option<i32>) -> napi::Result<serde_json::Value> {
-    let _timeout = timeout_ms.unwrap_or(3000) as u64;
+    let timeout = timeout_ms.unwrap_or(3000).max(0) as u64;
 
     // Step 1: Find the window info from CG to get PID, title, and bounds
     let (array_ref, count) = cg_window_list_raw()
@@ -565,16 +565,17 @@ pub fn activate_window(window_id: u32, timeout_ms: Option<i32>) -> napi::Result<
             if raise_err == K_AX_ERROR_SUCCESS {
                 raised = true;
             } else {
-                // Fallback: set AXMain attribute
+                // Fallback: set AXMain attribute. 7.6.1: its result counts; it used to be discarded and
+                // `raised` set regardless, so a window that could not be raised was reported as raised.
                 let main_key = CFString::new("AXMain");
-                let _ = unsafe {
+                let main_err = unsafe {
                     AXUIElementSetAttributeValue(
                         ax_win,
                         main_key.as_concrete_TypeRef(),
                         CFBoolean::true_value().to_void() as RawCFTypeRef,
                     )
                 };
-                raised = true;
+                raised = main_err == K_AX_ERROR_SUCCESS;
             }
             break;
         }
@@ -602,13 +603,36 @@ pub fn activate_window(window_id: u32, timeout_ms: Option<i32>) -> napi::Result<
         }
     }
 
+    // 7.6.1: observe rather than assert. `activateWithOptions:` is asynchronous and AXRaise can succeed on a window
+    // of an app that never comes to the front (minimised, another Space, cooperative activation refused), so poll
+    // the frontmost process until the timeout, as activate_app does, and report what was seen.
+    let mut activated = false;
+    if raised {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout);
+        loop {
+            if frontmost_pid() == Some(pid) {
+                activated = true;
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+    }
     let front_after = frontmost_pid().and_then(|p| bundle_id_for_pid(p));
 
     Ok(serde_json::json!({
         "windowId": window_id,
-        "activated": raised,
+        "activated": activated,
         "frontmostAfter": front_after,
-        "reason": if raised { serde_json::Value::Null } else { serde_json::json!("raise_failed") },
+        "reason": if activated {
+            serde_json::Value::Null
+        } else if raised {
+            serde_json::json!("not_frontmost")
+        } else {
+            serde_json::json!("raise_failed")
+        },
     }))
 }
 

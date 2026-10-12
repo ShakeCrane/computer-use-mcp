@@ -41,6 +41,12 @@ export interface ToolDefinition {
   handler?: ToolHandler
   /** Preserve the intentionally narrow legacy metadata shape for get_tool_metadata. */
   wireMetaShape?: 'full' | 'legacy_minimal'
+  /**
+   * 7.6.1: arguments the handler reads that the schema does not advertise (the click aliases' targeting, `scroll`'s
+   * `delta_x`/`delta_y`). Everything else that is not in the schema is refused with `invalid_arguments`: a misspelled
+   * `target_app` used to be dropped silently and the input went to the wrong window.
+   */
+  undeclaredArgs?: readonly string[]
 }
 
 export interface ToolRegistryOptions {
@@ -111,6 +117,30 @@ function stableJson(value: unknown): string {
 
 function argsHash(tool: string, args: Readonly<Record<string, unknown>>): string {
   return createHash('sha256').update(`${tool}\0${stableJson(args)}`).digest('hex')
+}
+
+function editDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index)
+  for (let i = 1; i <= left.length; i++) {
+    let diagonal = previous[0]
+    previous[0] = i
+    for (let j = 1; j <= right.length; j++) {
+      const saved = previous[j]
+      previous[j] = Math.min(previous[j] + 1, previous[j - 1] + 1, diagonal + (left[i - 1] === right[j - 1] ? 0 : 1))
+      diagonal = saved
+    }
+  }
+  return previous[right.length]
+}
+
+/** The declared name closest to an unknown one, when it is close enough to be a typo. */
+export function nearestArgumentName(unknown: string, declared: Iterable<string>): string | undefined {
+  let best: { name: string; distance: number } | undefined
+  for (const name of declared) {
+    const distance = editDistance(unknown.toLowerCase(), name.toLowerCase())
+    if (distance <= Math.max(2, Math.floor(name.length / 3)) && (!best || distance < best.distance)) best = { name, distance }
+  }
+  return best?.name
 }
 
 function modernClientCapabilities(ctx: ServerContext): Record<string, unknown> | undefined {
@@ -322,6 +352,26 @@ export class ToolRegistry {
           _meta: wireMeta,
         },
         async (args: Record<string, unknown>, extra) => {
+          // 7.6.1: an argument the schema does not declare is refused by name, with the nearest declared name. The
+          // parse below stays passthrough so the accepted undeclared keys (approval_token, an alias's targeting)
+          // reach the handler.
+          const accepted = new Set([...Object.keys(inputSchema), 'approval_token', ...(definition.undeclaredArgs ?? [])])
+          const unknownKeys = Object.keys(args ?? {}).filter(key => !accepted.has(key))
+          if (unknownKeys.length > 0) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify({
+                error: 'invalid_arguments',
+                tool: definition.name,
+                issues: unknownKeys.map(key => {
+                  const nearest = nearestArgumentName(key, accepted)
+                  return { path: key, message: `unknown argument${nearest ? `; did you mean "${nearest}"?` : ''}` }
+                }),
+                accepted: [...accepted].filter(key => key !== 'approval_token'),
+                remediation: ['Remove or rename the listed arguments; the tool input schema lists what this tool accepts.'],
+              }) }],
+              isError: true,
+            }
+          }
           // Apply advertised defaults and coercions before anything reads `args`,
           // so handlers never have to restate a schema default. Malformed input
           // becomes a recoverable tool result rather than a JSON-RPC fault: an

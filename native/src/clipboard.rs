@@ -172,9 +172,22 @@ mod win {
                     }
                     std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
                     let _ = GlobalUnlock(hmem);
-                    let _ = SetClipboardData(CF_UNICODETEXT.0 as u32, HANDLE(hmem.0));
-                    let _ = CloseClipboard();
-                    return Ok(());
+                    // 7.6.1: the result used to be discarded, so a failed set left the clipboard empty (EmptyClipboard
+                    // above) and the tool reported "Written"; a long `type` then pasted nothing and reported "Typed".
+                    match SetClipboardData(CF_UNICODETEXT.0 as u32, HANDLE(hmem.0)) {
+                        Ok(_) => {
+                            let _ = CloseClipboard();
+                            return Ok(());
+                        }
+                        Err(error) => {
+                            // The system owns the handle only after a successful SetClipboardData.
+                            let _ = GlobalFree(hmem);
+                            let _ = CloseClipboard();
+                            return Err(napi::Error::from_reason(format!(
+                                "SetClipboardData failed; the clipboard is now empty: {error}"
+                            )));
+                        }
+                    }
                 }
                 if attempt < MAX_RETRIES - 1 {
                     std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS));

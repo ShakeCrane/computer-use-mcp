@@ -772,15 +772,15 @@ export function registerRunConsole(
   })
 
   define('run_say', {
-    description: 'Add a turn to the run transcript. Use it to speak to the person watching without changing task state. A turn with role "user" is a message from that person; every run tool reply carries the whole transcript, so read it and adjust rather than ignoring a mid-run instruction.',
+    description: 'Add an agent turn to the run transcript: speak to the person watching without changing task state. Turns with role "user" come from the person through the console, never from this tool; every run tool reply carries the whole transcript, so read it and adjust rather than ignoring a mid-run instruction.',
     inputSchema: {
       runId,
       text: z.string().min(1).max(4000).describe('What is being said'),
-      role: z.enum(['user', 'agent']).default('agent').describe('Who is speaking'),
       acknowledge: z.number().int().min(0).optional().describe('Highest pending message id this answers. Pass it when replying to something the person typed mid-run, so it stops being reported as unanswered.'),
     },
   }, args => {
-    const run = store.say(args.runId, args.role, args.text)
+    // 7.6.1: the model used to be able to pass role: "user" and plant an instruction the next turn would obey.
+    const run = store.say(args.runId, 'agent', args.text)
     return reply(args.acknowledge === undefined ? run : store.acknowledge(args.runId, args.acknowledge))
   })
 

@@ -35,16 +35,47 @@ def facts(node):
             'actions': actions}
 
 
-def run():
+class Structured(Exception):
+    """An error with a typed payload the server returns as-is (7.6.1, issue #21)."""
+
+    def __init__(self, payload):
+        super().__init__(payload.get('error', 'atspi_error'))
+        self.payload = payload
+
+
+def find_window():
+    """The AT-SPI frame for the window the server resolved: by PID, then title (exact, then case-insensitive
+    substring), then the only frame the process has. On a miss the error lists what AT-SPI exposes for that PID, so a
+    toolkit with accessibility off (empty list) is distinguishable from a title that differs."""
     desktop = Atspi.get_desktop(0)
-    windows = []
+    frames = []
     for app in children(desktop):
-        if app.get_process_id() != window['pid']:
+        if app is None or app.get_process_id() != window['pid']:
             continue
-        windows.extend([child for child in children(app) if child.get_name() == window.get('title')])
-    if len(windows) != 1:
-        raise RuntimeError('Window inaccessible or ambiguous by PID and title')
-    root = windows[0]
+        frames.extend([child for child in children(app) if child is not None])
+    title = (window.get('title') or '').strip()
+    exact = [frame for frame in frames if (frame.get_name() or '') == title]
+    if len(exact) == 1:
+        return exact[0]
+    loose = [frame for frame in frames if title and title.lower() in (frame.get_name() or '').lower()]
+    if len(loose) == 1:
+        return loose[0]
+    if len(frames) == 1:
+        return frames[0]
+    raise Structured({
+        'error': 'atspi_window_not_found' if not frames else 'atspi_window_ambiguous',
+        'pid': window['pid'], 'title': title,
+        'seen': [{'name': frame.get_name(), 'role': frame.get_role_name()} for frame in frames][:20],
+        'remediation': [
+            'The process exposes no accessible frames: enable toolkit accessibility (gsettings set org.gnome.desktop.interface toolkit-accessibility true; GTK_MODULES=gail:atk-bridge for GTK apps, QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 for Qt) and restart the app.'
+            if not frames else
+            'Several frames match; pass the window whose title is unique, or set_target with the exact title.',
+        ],
+    })
+
+
+def run():
+    root = find_window()
     visited = []
     count = [0]
     limit = min(max(int(args.get('max_depth', 10)), 1), 30)
@@ -105,5 +136,7 @@ def run():
 
 try:
     print(json.dumps(run()))
+except Structured as error:
+    print(json.dumps({**error.payload, 'backend': 'atspi'}))
 except Exception as error:
     print(json.dumps({'error': str(error), 'backend': 'atspi'}))

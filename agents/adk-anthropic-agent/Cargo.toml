@@ -1,0 +1,24 @@
+[package]
+name = "computer-use-adk-anthropic-agent"
+version = "0.0.1"
+edition = "2024"
+publish = false
+description = "A Claude agent on ADK-Rust driving a desktop through computer-use-mcp, with the status card on"
+
+[workspace]
+
+[dependencies]
+# ADK-Rust from a checkout two directories above this repository (projects/adk-rust beside projects/mcp-servers). The 3.x API this example
+# uses is not yet on crates.io; point these paths at your checkout, or add a [patch] section.
+adk-core = { path = "../../../../adk-rust/adk-core" }
+adk-agent = { path = "../../../../adk-rust/adk-agent" }
+adk-model = { path = "../../../../adk-rust/adk-model", features = ["anthropic"] }
+adk-tool = { path = "../../../../adk-rust/adk-tool", features = ["mcp"] }
+adk-runner = { path = "../../../../adk-rust/adk-runner" }
+adk-session = { path = "../../../../adk-rust/adk-session" }
+tokio = { version = "1.40", features = ["full"] }
+futures = "0.3"
+serde_json = "1.0"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -64,8 +64,12 @@ export class ScreenshotHandler {
     return { width, quality }
   }
 
-  /** The window a capture means: explicit id, then target_app (+ title), then the session's. */
+  /**
+   * The window a capture means: explicit id, then target_app (+ title), then the session's.
+   * `full_screen: true` wins over all three (7.6.1: it was advertised in 7.6.0 and never read).
+   */
   #captureWindow(args: Record<string, unknown>): { windowId?: number; app?: string } {
+    if (args.full_screen === true) return {}
     let windowId = typeof args.target_window_id === 'number' ? args.target_window_id : undefined
     const app = windowId ? undefined
       : typeof args.target_app === 'string' && args.target_app.length > 0 ? args.target_app : undefined
@@ -245,8 +249,10 @@ export class ScreenshotHandler {
       const quality = typeof args.quality === 'number' ? args.quality
         : this.#env.COMPUTER_USE_QUALITY !== undefined ? Number.parseInt(this.#env.COMPUTER_USE_QUALITY)
           : PROVIDER_QUALITY[provider] ?? PROVIDER_QUALITY.default
-      let windowId = typeof args.target_window_id === 'number' ? args.target_window_id : undefined
-      const app = windowId ? undefined
+      // 7.6.1: full_screen wins over an explicit target and the session target (it was schema-only in 7.6.0).
+      const fullScreen = args.full_screen === true
+      let windowId = fullScreen ? undefined : typeof args.target_window_id === 'number' ? args.target_window_id : undefined
+      const app = fullScreen || windowId ? undefined
         : typeof args.target_app === 'string' && args.target_app.length > 0 ? args.target_app : undefined
       const title = typeof args.target_title === 'string' && args.target_title.length > 0 ? args.target_title : undefined
       if (windowId === undefined && app !== undefined) {
@@ -260,7 +266,7 @@ export class ScreenshotHandler {
           throw error
         }
       }
-      if (windowId === undefined && app === undefined) windowId = this.#targets.observationWindow()
+      if (!fullScreen && windowId === undefined && app === undefined) windowId = this.#targets.observationWindow()
       if (!this.#visionEnabled) {
         const frontmost = this.#native.getFrontmostApp()
         const display = this.#native.getDisplaySize()

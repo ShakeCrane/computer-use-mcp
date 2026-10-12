@@ -111,6 +111,51 @@ export function darwinSupportsScreenCaptureKit(darwinRelease: string = release()
   return Number.isFinite(major) && major >= 23
 }
 
+/**
+ * Compile a Swift source into the cache directory, once per source hash, and sign it ad hoc. Shared by the
+ * capture/OCR helper and the status card. 7.6.1: no per-call abort signal reaches the compiler, so a cancelled first
+ * call can no longer cache "swiftc failed" for ten minutes (the compile timeout bounds it instead).
+ */
+export async function compileSwiftHelper(options: {
+  sourcePath: string
+  cacheDir: string
+  name: string
+  run?: Runner
+  compileTimeoutMs?: number
+  platform?: NodeJS.Platform
+}): Promise<HelperAvailability> {
+  const platform = options.platform ?? process.platform
+  const run = options.run ?? defaultRunner
+  const compileTimeoutMs = options.compileTimeoutMs ?? 180_000
+  if (platform !== 'darwin') {
+    return { ok: false, reason: 'macOS only', remediation: 'This needs macOS (ScreenCaptureKit and Vision).' }
+  }
+  let source: Buffer
+  try { source = readFileSync(options.sourcePath) } catch {
+    return { ok: false, reason: `helper source missing: ${options.sourcePath}`, remediation: `Reinstall the package; ${options.sourcePath} is part of it.` }
+  }
+  const sha = createHash('sha256').update(source).digest('hex').slice(0, 8)
+  const target = join(options.cacheDir, `${options.name}-${sha}`)
+  if (existsSync(target)) return { ok: true, path: target }
+  const remediation = 'Install the Xcode Command Line Tools (xcode-select --install) so swiftc can build the helper, then retry.'
+  const which = await run('xcrun', ['-f', 'swiftc'], { timeout: 10_000 })
+  if (which.code !== 0) return { ok: false, reason: 'swiftc not found', remediation }
+  try { mkdirSync(options.cacheDir, { recursive: true }) } catch { /* reported by the compile */ }
+  // Build to a unique name and rename into place, so two processes compiling at
+  // once never run a half-written binary.
+  const temporary = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  const built = await run('xcrun', ['swiftc', '-O', '-o', temporary, options.sourcePath], { timeout: compileTimeoutMs })
+  if (built.code !== 0 || !existsSync(temporary)) {
+    try { rmSync(temporary, { force: true }) } catch { /* nothing to remove */ }
+    return { ok: false, reason: `swiftc failed: ${built.stderr.trim().slice(0, 400)}`, remediation }
+  }
+  await run('codesign', ['--force', '--sign', '-', temporary], { timeout: 30_000 })
+  try { renameSync(temporary, target) } catch (error) {
+    return { ok: false, reason: `could not install helper: ${(error as Error).message}`, remediation }
+  }
+  return { ok: true, path: target }
+}
+
 export function createMacosHelper(options: {
   sourcePath?: string
   cacheDir?: string
@@ -134,41 +179,15 @@ export function createMacosHelper(options: {
   const sck = platform === 'darwin' && darwinSupportsScreenCaptureKit(options.darwinRelease)
   let compiled: Promise<HelperAvailability> | undefined
 
-  const compile = async (signal?: AbortSignal): Promise<HelperAvailability> => {
-    if (platform !== 'darwin') {
-      return { ok: false, reason: 'macOS only', remediation: 'This needs macOS (ScreenCaptureKit and Vision).' }
-    }
-    let source: Buffer
-    try { source = readFileSync(sourcePath) } catch {
-      return { ok: false, reason: `helper source missing: ${sourcePath}`, remediation: 'Reinstall the package; libexec/macos-agent-helper.swift is part of it.' }
-    }
-    const sha = createHash('sha256').update(source).digest('hex').slice(0, 8)
-    const target = join(cacheDir, `macos-agent-helper-${sha}`)
-    if (existsSync(target)) return { ok: true, path: target }
-    const remediation = 'Install the Xcode Command Line Tools (xcode-select --install) so swiftc can build the helper, then retry.'
-    const which = await run('xcrun', ['-f', 'swiftc'], { timeout: 10_000, signal })
-    if (which.code !== 0) return { ok: false, reason: 'swiftc not found', remediation }
-    try { mkdirSync(cacheDir, { recursive: true }) } catch { /* reported by the compile */ }
-    // Build to a unique name and rename into place, so two processes compiling at
-    // once never run a half-written binary.
-    const temporary = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
-    const built = await run('xcrun', ['swiftc', '-O', '-o', temporary, sourcePath], { timeout: compileTimeoutMs, signal })
-    if (built.code !== 0 || !existsSync(temporary)) {
-      try { rmSync(temporary, { force: true }) } catch { /* nothing to remove */ }
-      return { ok: false, reason: `swiftc failed: ${built.stderr.trim().slice(0, 400)}`, remediation }
-    }
-    await run('codesign', ['--force', '--sign', '-', temporary], { timeout: 30_000, signal })
-    try { renameSync(temporary, target) } catch (error) {
-      return { ok: false, reason: `could not install helper: ${(error as Error).message}`, remediation }
-    }
-    return { ok: true, path: target }
-  }
+  const compile = (): Promise<HelperAvailability> =>
+    compileSwiftHelper({ sourcePath, cacheDir, name: 'macos-agent-helper', run, compileTimeoutMs, platform })
 
   const now = options.now ?? Date.now
   let failedAt = 0
+  // The signal is accepted for API compatibility; the compile itself runs without it (7.6.1).
   const ensure = (signal?: AbortSignal): Promise<HelperAvailability> => {
     if (!compiled) {
-      compiled = compile(signal).then(result => {
+      compiled = compile().then(result => {
         if (!result.ok) failedAt = now()
         return result
       })

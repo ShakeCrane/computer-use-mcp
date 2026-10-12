@@ -193,12 +193,13 @@ test('the run tools are reachable and report a live plan', async () => {
     assert.equal(finished.tasks.find(task => task.id === 'model').status, 'done')
     assert.equal(finished.narration, 'Modelling')
 
-    // A note sent from the console reaches the agent in its next reply, without
-    // the agent having to poll for it.
-    await client.callTool('run_say', { runId, text: 'use warmer lighting', role: 'user' })
+    // A turn the agent adds reaches it in its next reply. 7.6.1: the agent cannot speak as the person; a `role`
+    // argument is ignored (user turns come only from the console host through the store).
+    await client.callTool('run_say', { runId, text: 'switching to warmer lighting', role: 'user' })
     const next = parse(await client.callTool('run_progress', { runId, taskId: 'render', status: 'active' }))
-    assert.equal(next.messages.at(-1).text, 'use warmer lighting')
-    assert.equal(next.messages.at(-1).role, 'user')
+    assert.equal(next.messages.at(-1).text, 'switching to warmer lighting')
+    assert.equal(next.messages.at(-1).role, 'agent')
+    assert.equal(next.pending.length, 0, 'an agent turn is never reported as an unanswered user instruction')
 
     const view = parse(await client.callTool('run_console', { runId }))
     assert.equal(view.prompt, 'Render a still life')

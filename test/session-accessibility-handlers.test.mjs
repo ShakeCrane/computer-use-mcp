@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { handleAccessibilityTool } from '../dist/session/accessibility-handlers.js'
 import { TargetStateController } from '../dist/session/target-state.js'
+import { InputHandler } from '../dist/session/input-handlers.js'
 
 function native(overrides = {}) {
   const calls = []
@@ -52,14 +53,48 @@ test('extracted accessibility click uses bounded coordinate fallback and records
       performed: false, reason: 'unsupported_action',
       bounds: { x: 10, y: 20, width: 30, height: 40 },
     }),
+    getDisplaySize: () => ({ width: 1440, height: 900, scaleFactor: 2 }),
+    listDisplays: () => [{ x: 0, y: 0, width: 1440, height: 900 }],
   })
   const ctx = context(service)
+  // 7.6.1: the fallback posts through the input handler, so the user-active guard and coordinate validation apply.
+  let guardReads = 0
+  const guard = { activity: () => { guardReads++; return { msSinceInput: 60_000, thresholdMs: 4000, active: false } }, check: () => {}, status: () => ({}) }
+  ctx.input = new InputHandler({ native: service, targets: ctx.targets, focus: ctx.focus, sleep: async () => {}, guard })
   const result = await handleAccessibilityTool('click_element', {
     window_id: 42, role: 'AXButton', label: 'Submit',
   }, ctx)
   assert.equal(result.isError, undefined)
   assert.deepEqual(service.calls, [['mouseMove', 25, 40], ['mouseClick', 25, 40, 'left', 1]])
   assert.equal(ctx.targets.current().establishedBy, 'pointer')
+  assert.ok(guardReads > 0, 'the guard was consulted for the fallback click')
+})
+
+test('7.6.1: the click_element coordinate fallback is refused while the user is active, like click', async () => {
+  const service = native({
+    performAction: () => ({ performed: false, reason: 'unsupported_action', bounds: { x: 10, y: 20, width: 30, height: 40 } }),
+    getDisplaySize: () => ({ width: 1440, height: 900, scaleFactor: 2 }),
+    listDisplays: () => [{ x: 0, y: 0, width: 1440, height: 900 }],
+  })
+  const ctx = context(service)
+  const guard = {
+    activity: () => ({ msSinceInput: 120, thresholdMs: 4000, active: true }),
+    check: () => { const error = new Error('user_active'); error.details = { error: 'user_active' }; throw error },
+    status: () => ({}),
+  }
+  ctx.input = new InputHandler({ native: service, targets: ctx.targets, focus: ctx.focus, sleep: async () => {}, guard })
+  await assert.rejects(handleAccessibilityTool('click_element', { window_id: 42, role: 'AXButton', label: 'Submit' }, ctx), /user_active/)
+  assert.deepEqual(service.calls, [], 'nothing was posted')
+})
+
+test('7.6.1: without an input handler the fallback is a structured refusal, never a raw native click', async () => {
+  const service = native({
+    performAction: () => ({ performed: false, reason: 'unsupported_action', bounds: { x: 10, y: 20, width: 30, height: 40 } }),
+  })
+  const result = await handleAccessibilityTool('click_element', { window_id: 42, role: 'AXButton', label: 'Submit' }, context(service))
+  assert.equal(result.isError, true)
+  assert.equal(JSON.parse(result.content[0].text).error, 'input_unavailable')
+  assert.deepEqual(service.calls, [])
 })
 
 test('extracted accessibility miss returns ranked label recovery candidates', async () => {

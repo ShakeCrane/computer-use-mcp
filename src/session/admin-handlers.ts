@@ -342,7 +342,7 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
     }
     try {
       const response = await (context.fetch ?? globalThis.fetch)(url, {
-        headers: { 'User-Agent': 'computer-use-mcp/7.0.0' }, signal: AbortSignal.timeout(15_000),
+        headers: { 'User-Agent': 'computer-use-mcp' }, signal: AbortSignal.timeout(15_000),
       })
       if (!response.ok) return { content: [{ type: 'text', text: `HTTP ${response.status}: ${response.statusText}` }], isError: true }
       const html = await response.text()
