@@ -218,9 +218,16 @@ jobs:
       - name: Build TypeScript
         run: npx tsc
 
+      - name: Verify the current source build addon loads
+        run: node scripts/verify-local-native.mjs
+        env:
+          COMPUTER_USE_NATIVE_PATH: ${{ github.workspace }}/${{ matrix.os.binary }}
+
       - name: Run full test suite (all platforms)
         shell: bash
         run: node --test test/*.test.mjs
+        env:
+          COMPUTER_USE_NATIVE_PATH: ${{ github.workspace }}/${{ matrix.os.binary }}
 
       - name: Download packed native packages
         uses: actions/download-artifact@v4
@@ -233,11 +240,20 @@ jobs:
 
       - name: Run smoke test (Windows)
         if: runner.os == 'Windows'
-        run: node test/smoke-windows.mjs
+        shell: bash
+        run: |
+          node scripts/verify-local-native.mjs
+          node test/smoke-windows.mjs
+        env:
+          COMPUTER_USE_NATIVE_PATH: ${{ github.workspace }}/${{ matrix.os.binary }}
 
       - name: Run smoke test (Linux)
         if: runner.os == 'Linux'
-        run: node -e "const { loadNative } = await import('./dist/native.js'); const n = loadNative(); const c = n.getInputMonitorCapability(); if (typeof c.supported !== 'boolean' || c.distinguishesInjected !== false) throw new Error('invalid honest Linux input-monitor capability'); console.log('Native module loaded:', Object.keys(n).length, 'functions; input monitor:', c)"
+        run: |
+          node scripts/verify-local-native.mjs
+          node -e "const { loadNative } = await import('./dist/native.js'); const n = loadNative(); const c = n.getInputMonitorCapability(); if (typeof c.supported !== 'boolean' || c.distinguishesInjected !== false) throw new Error('invalid honest Linux input-monitor capability'); console.log('Native module loaded:', Object.keys(n).length, 'functions; input monitor:', c)"
+        env:
+          COMPUTER_USE_NATIVE_PATH: ${{ github.workspace }}/${{ matrix.os.binary }}
 
       # 7.6.1: the input smoke used to "pass" on Linux with no X server because the native layer returned silently;
       # coordinate validation now asks the display for its size, so the clicks need a display. Xvfb gives them a real one.
@@ -247,11 +263,20 @@ jobs:
 
       - name: Run new tools smoke test (Linux, under Xvfb)
         if: runner.os == 'Linux'
-        run: xvfb-run -a --server-args="-screen 0 1280x800x24" node test/smoke-new-tools.mjs
+        run: |
+          node scripts/verify-local-native.mjs
+          xvfb-run -a --server-args="-screen 0 1280x800x24" node test/smoke-new-tools.mjs
+        env:
+          COMPUTER_USE_NATIVE_PATH: ${{ github.workspace }}/${{ matrix.os.binary }}
 
       - name: Run new tools smoke test
         if: runner.os != 'Linux'
-        run: node test/smoke-new-tools.mjs
+        shell: bash
+        run: |
+          node scripts/verify-local-native.mjs
+          node test/smoke-new-tools.mjs
+        env:
+          COMPUTER_USE_NATIVE_PATH: ${{ github.workspace }}/${{ matrix.os.binary }}
 
   package:
     name: Verify package contents

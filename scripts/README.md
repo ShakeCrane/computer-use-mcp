@@ -15,6 +15,7 @@ need a native build and OS permissions. They are not unattended unit tests.
 | `npm run prepare:packages` | Synchronize native versions and optional pins, and copy available native binaries. |
 | `npm run pack:platforms` | Require all six build artifacts and pack verified native tarballs. |
 | `node test/platform-install.mjs` | Install packed native dependencies using a disposable local registry and load the addon. |
+| `node scripts/verify-local-native.mjs` | Verify that source execution resolves and loads the current host build artifact; use a process-scoped `COMPUTER_USE_NATIVE_PATH`. |
 
 `build-ts.mjs` compiles TypeScript into `dist.next` and swaps it into `dist`, so a server starting mid-build still finds its files (`clean-dist.mjs` only removes generated output). `live-windows.mjs` is
 an attended Windows development probe. Legacy Mission Control/Spaces experiments

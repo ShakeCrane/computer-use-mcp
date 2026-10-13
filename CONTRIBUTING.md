@@ -10,7 +10,7 @@ git clone https://github.com/zavora-ai/computer-use-mcp
 cd computer-use-mcp
 npm ci
 npm run build
-npm run demo  # verify everything works
+# Select the checkout addon with the source validation commands below.
 ```
 
 ### Windows
@@ -20,7 +20,7 @@ cd computer-use-mcp
 npm install
 npm run build:native:win   # builds Rust native module
 npm run build:ts            # compiles TypeScript
-node test/smoke-windows.mjs # verify everything works
+# Select the checkout addon as described below before running source smoke tests.
 ```
 
 **Windows prerequisites:**
@@ -36,6 +36,7 @@ cd computer-use-mcp
 npm install
 npm run build:native:linux  # builds Rust native module
 npm run build:ts             # compiles TypeScript
+# Select the checkout addon with the source validation commands below.
 ```
 
 **Linux prerequisites:**
@@ -82,12 +83,58 @@ dist/             Compiled TypeScript output (generated, not committed)
 For native package versioning, packing, CI and npm staged publishing, see
 [Native package releases](docs/NATIVE-PACKAGES.md).
 
+### Using the checkout native build
+
+Once platform packages are published, `npm install` / `npm ci` can install an
+addon that takes precedence over the binary you just built. For source tests,
+server or console runs, explicitly select the checkout artifact with the existing
+`COMPUTER_USE_NATIVE_PATH` override. Build the addon and TypeScript first.
+
+On macOS/Linux, use a process-scoped override (from the repository root):
+
+```bash
+native_path="$(node -p "require('node:path').resolve('computer-use-napi.' + process.platform + '-' + process.arch + '.node')")"
+COMPUTER_USE_NATIVE_PATH="$native_path" node scripts/verify-local-native.mjs
+COMPUTER_USE_NATIVE_PATH="$native_path" npm test
+```
+
+On Windows PowerShell, restore the previous environment value after the run:
+
+```powershell
+$sourceNativePath = node -p "require('node:path').resolve('computer-use-napi.' + process.platform + '-' + process.arch + '.node')"
+$previousNativePath = $env:COMPUTER_USE_NATIVE_PATH
+try {
+    $env:COMPUTER_USE_NATIVE_PATH = $sourceNativePath
+    node scripts/verify-local-native.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Source native validation failed' }
+    node test/smoke-windows.mjs
+} finally {
+    if ($null -eq $previousNativePath) {
+        Remove-Item Env:COMPUTER_USE_NATIVE_PATH -ErrorAction SilentlyContinue
+    } else {
+        $env:COMPUTER_USE_NATIVE_PATH = $previousNativePath
+    }
+}
+```
+
+The verifier rejects missing/empty artifacts and another Node architecture,
+compares the actual resolved path, and loads the addon without desktop actions.
+Use the build target matching `process.arch` (ARM64 Windows Node uses the existing
+`build:native:win:arm64` command). Keep the same process-scoped override when
+running other source commands. Restart a running host after rebuilding; loaded
+native modules are cached. Production loading order, custom overrides and bundled
+fallback remain unchanged. The verifier specifically checks the checkout build;
+an intentionally different custom addon can still be used through the normal loader.
+
 ### TypeScript changes
 Edit files in `src/`, then:
 ```bash
 npm run build:ts
 npm test
 ```
+
+For source-build validation, run the tests with the process-scoped native path
+shown above so an installed platform package cannot shadow the checkout artifact.
 
 ### Rust changes
 Edit files in `native/src/`, then:

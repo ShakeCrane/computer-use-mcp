@@ -7,7 +7,7 @@ import * as fs from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import * as path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { gunzipSync } from 'node:zlib'
 import { TARGETS } from '../scripts/prepare-platform-packages.mjs'
@@ -130,6 +130,28 @@ try {
   const installedRoot = path.join(probe, 'node_modules', rootPkg.name)
   const legacyBinary = path.join(installedRoot, binaryName)
   await check(probe, legacyBinary, legacyBinary)
+
+  // A source checkout under the probe resolves the already installed platform package.
+  // Its freshly built root binary must win when source validation explicitly selects it.
+  const source = path.join(probe, 'source-checkout')
+  fs.mkdirSync(path.join(source, 'dist'), { recursive: true })
+  fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({ type: 'module' }))
+  fs.copyFileSync(path.join(root, 'dist', 'native.js'), path.join(source, 'dist', 'native.js'))
+  const currentBinary = path.join(source, binaryName)
+  fs.copyFileSync(path.join(root, binaryName), currentBinary)
+  const sourceCheck = `
+    import { verifyLocalNative } from ${JSON.stringify(pathToFileURL(path.join(root, 'scripts', 'verify-local-native.mjs')).href)};
+    await verifyLocalNative(${JSON.stringify(binaryName)}, ${JSON.stringify(source)});
+  `
+  await assert.rejects(execute(process.execPath, ['--input-type=module', '-e', sourceCheck], {
+    cwd: probe, env,
+  }), error => error.stderr.includes('must select the current build artifact'))
+  const current = await execute(process.execPath, ['--input-type=module', '-e', sourceCheck], {
+    cwd: probe, env: { ...env, COMPUTER_USE_NATIVE_PATH: currentBinary },
+  })
+  console.log(current.stdout.trim())
+  console.log('Source checkout uses the current build artifact with an installed platform package present')
+
   for (const name of fs.readdirSync(installedRoot).filter(name => name.endsWith('.node'))) fs.unlinkSync(path.join(installedRoot, name))
   await check(probe, optionalBinary)
   console.log('Optional package loads with all bundled binaries removed; explicit override retains precedence')
@@ -137,6 +159,12 @@ try {
   const omitted = await install('omitted', ['--omit=optional'])
   assert.equal(fs.existsSync(path.join(omitted, 'node_modules', nativeName)), false)
   await check(omitted, path.join(omitted, 'node_modules', rootPkg.name, binaryName))
+  const omittedRoot = path.join(omitted, 'node_modules', rootPkg.name)
+  const generic = path.join(omittedRoot, 'computer-use-napi.node')
+  fs.copyFileSync(path.join(omittedRoot, binaryName), generic)
+  fs.unlinkSync(path.join(omittedRoot, binaryName))
+  await check(omitted, generic)
+  console.log('Generic bundled fallback loads when the platform binary and optional package are absent')
   available = false
   const unavailable = await install('unavailable')
   assert.equal(fs.existsSync(path.join(unavailable, 'node_modules', nativeName)), false)

@@ -36,6 +36,24 @@ the bundled native addon. An explicit native path retains its existing behavior.
 Bundlers can keep the matching native package external and ship its `.node`
 file separately, or use the existing path override when staging a binary.
 
+## Source checkout validation
+
+Source development and CI select the freshly built root binary with a
+process-scoped `COMPUTER_USE_NATIVE_PATH`; installing platform packages does not
+change this explicit choice. `node scripts/verify-local-native.mjs` requires a
+nonempty artifact matching this Node platform/architecture, checks the real
+resolved path, and actually loads its native exports. A missing override target
+must not make source validation pass through an installed optional package.
+See [the contributing guide](../CONTRIBUTING.md#using-the-checkout-native-build)
+for shell examples that leave the user's persistent environment unchanged.
+
+Each CI source suite/smoke step sets the path to its downloaded build artifact;
+the smoke steps run the verifier before their existing checks. The consumer
+installation step has no source override and clears any inherited override in
+its disposable child environment. It still proves that a normal npm install
+loads the matching platform package and that optional-package failures fall back
+to bundled binaries. No production resolver order or override semantics change.
+
 ## Versioning and packing
 
 Use `npm version <version> --no-git-tag-version` to update the root version and
@@ -68,8 +86,9 @@ job after `build-native`. It packs all six targets and uploads the tarballs as
 `native-platform-packages`. The existing macOS arm64, Windows x64/arm64 and Linux
 x64/arm64 test jobs install these exact tarballs through a temporary local
 registry and load the addon through the main package. The test checks automatic
-host selection, override precedence, loading with bundled binaries removed,
-and fallback when optional packages are omitted or unavailable. Metadata and
+host selection, override precedence, a source checkout with an already installed
+platform package, loading with bundled binaries removed, and platform/generic
+bundled fallback when optional packages are omitted or unavailable. Metadata and
 contents are checked for all six targets, including cross-compiled macOS x64.
 
 After all existing release gates pass, the upstream main-push release job:
