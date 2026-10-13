@@ -110,7 +110,8 @@ try {
     const code = `
       const { resolveAddonPath, loadNative } = await import('@zavora-ai/computer-use-mcp/host-native');
       const assert = (await import('node:assert/strict')).default;
-      assert.equal(resolveAddonPath(), ${JSON.stringify(expected)});
+      const { realpathSync } = await import('node:fs');
+      assert.equal(realpathSync(resolveAddonPath()), realpathSync(${JSON.stringify(expected)}));
       const addon = loadNative();
       assert.equal(typeof addon.getDisplaySize, 'function');
       console.log('Native loaded from:', resolveAddonPath(), 'exports:', Object.keys(addon).length);
