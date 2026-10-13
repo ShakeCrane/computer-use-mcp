@@ -47,8 +47,11 @@ must not make source validation pass through an installed optional package.
 See [the contributing guide](../CONTRIBUTING.md#using-the-checkout-native-build)
 for shell examples that leave the user's persistent environment unchanged.
 
-Each CI source suite/smoke step sets the path to its downloaded build artifact;
-the smoke steps run the verifier before their existing checks. The consumer
+CI installs source test dependencies with `--omit=optional`, so the full fixture
+suite cannot resolve an old platform package and keeps its override environment
+clean for missing-addon fixtures. Source validation and each smoke step explicitly
+set the path to the downloaded build artifact and run the verifier before their
+existing checks. The consumer
 installation step has no source override and clears any inherited override in
 its disposable child environment. It still proves that a normal npm install
 loads the matching platform package and that optional-package failures fall back

@@ -204,7 +204,8 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        # Source fixtures need a clean override environment; omit installed native packages.
+        run: npm ci --omit=optional
 
       - name: Download native binary
         uses: actions/download-artifact@v4
@@ -226,8 +227,6 @@ jobs:
       - name: Run full test suite (all platforms)
         shell: bash
         run: node --test test/*.test.mjs
-        env:
-          COMPUTER_USE_NATIVE_PATH: ${{ github.workspace }}/${{ matrix.os.binary }}
 
       - name: Download packed native packages
         uses: actions/download-artifact@v4
