@@ -12,6 +12,7 @@ install-probe/
 pack.json
 release-sbom.cdx.json
 *.tgz
+packages/*/LICENSE
 
 showcase-output/
 .DS_Store

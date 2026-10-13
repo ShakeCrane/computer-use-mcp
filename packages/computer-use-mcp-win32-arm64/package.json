@@ -11,5 +11,13 @@
   ],
   "files": [
     "computer-use-napi.win32-arm64.node"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zavora-ai/computer-use-mcp.git",
+    "directory": "packages/computer-use-mcp-win32-arm64"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

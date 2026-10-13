@@ -11,5 +11,13 @@
   ],
   "files": [
     "computer-use-napi.darwin-x64.node"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zavora-ai/computer-use-mcp.git",
+    "directory": "packages/computer-use-mcp-darwin-x64"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

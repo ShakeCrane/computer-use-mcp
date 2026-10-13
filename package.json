@@ -1,7 +1,7 @@
 {
   "name": "@zavora-ai/computer-use-mcp",
   "version": "7.6.1",
-  "description": "MCP server + client for cross-platform desktop control (macOS + Windows + Linux) \u2014 screenshot, mouse, keyboard, clipboard, app management. Backed by Rust NAPI native module.",
+  "description": "MCP server + client for cross-platform desktop control (macOS + Windows + Linux) — screenshot, mouse, keyboard, clipboard, app management. Backed by Rust NAPI native module.",
   "author": "James Karanja Maina <james@zavora.ai> (https://zavora.ai)",
   "license": "MIT",
   "homepage": "https://github.com/zavora-ai/computer-use-mcp#readme",
@@ -157,7 +157,9 @@
     "test:browser": "npm run build:ts && node scripts/test-browser.mjs",
     "evaluate:strategy": "npm run build:ts && node scripts/evaluate-strategy.mjs",
     "console": "node dist/run-console-host.js",
-    "integration:macos": "npm run build:ts && node scripts/integration-status-card.mjs"
+    "integration:macos": "npm run build:ts && node scripts/integration-status-card.mjs",
+    "pack:platforms": "node scripts/pack-platform-packages.mjs",
+    "version": "npm run prepare:packages -- --sync-only"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",
@@ -175,6 +177,12 @@
     "typescript-eslint": "8.46.0"
   },
   "optionalDependencies": {
-    "playwright": "^1.63.0"
+    "playwright": "^1.63.0",
+    "@zavora-ai/computer-use-mcp-darwin-arm64": "7.6.1",
+    "@zavora-ai/computer-use-mcp-darwin-x64": "7.6.1",
+    "@zavora-ai/computer-use-mcp-win32-x64": "7.6.1",
+    "@zavora-ai/computer-use-mcp-win32-arm64": "7.6.1",
+    "@zavora-ai/computer-use-mcp-linux-x64": "7.6.1",
+    "@zavora-ai/computer-use-mcp-linux-arm64": "7.6.1"
   }
 }

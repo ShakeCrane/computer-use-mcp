@@ -1,6 +1,6 @@
 /**
  * Native NAPI module loader — loads the compiled .node addon.
- * Supports macOS (darwin) and Windows (win32) with platform-specific binaries.
+ * Supports macOS (darwin), Windows (win32) and Linux with platform-specific binaries.
  */
 
 import { createRequire } from 'module'
@@ -33,9 +33,8 @@ const require = createRequire(import.meta.url)
  *   4. legacy package-root generic `computer-use-napi.node`
  * Throws a doctor-friendly error when none resolve.
  *
- * Exported for tests. When the optional packages are unpublished (current
- * state), resolution falls through to the legacy root binary — identical to
- * prior behavior.
+ * Exported for tests. If optional packages are omitted or unavailable,
+ * resolution falls through to the legacy root binary.
  */
 export interface AddonResolverOptions {
   /** Test/embedding seam that avoids mutating the process-wide node_modules tree. */
@@ -89,8 +88,6 @@ export function resolveAddonPath(options: AddonResolverOptions = {}): string {
   attempts.push(generic)
   if (existsSync(generic)) return generic
 
-  // 7.6.1: the per-platform packages (@zavora-ai/computer-use-mcp-<platform>-<arch>) are not published yet (issue #36),
-  // so the message no longer tells users to install them; the resolver still honours one when it is installed.
   throw new Error(
     `Native binary missing for ${platform}-${arch}. ` +
     `Reinstall @zavora-ai/computer-use-mcp (the tarball bundles every platform binary), ` +
