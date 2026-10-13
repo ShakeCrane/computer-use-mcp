@@ -7,8 +7,10 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { resolveAddonPath } from '../dist/native.js'
 import { preparePlatformPackages } from '../scripts/prepare-platform-packages.mjs'
+import { npmCommand } from '../scripts/npm-command.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const rootPkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
@@ -90,6 +92,24 @@ test('preparation synchronizes a new version, dependencies and lockfile and copi
     assert.ok(lock.packages[`node_modules/${name}`].resolved.endsWith(`-${pkg.version}.tgz`))
     assert.equal(fs.readFileSync(path.join(dir, `computer-use-napi.${target}.node`), 'utf8'), `new-${target}`)
     assert.equal(fs.readFileSync(path.join(dir, 'LICENSE'), 'utf8'), fs.readFileSync(path.join(root, 'LICENSE'), 'utf8'))
+  }
+})
+
+test('npm version runs the synchronization hook without native builds or registry access', t => {
+  const directory = fixture(t)
+  fs.mkdirSync(path.join(directory, 'scripts'))
+  fs.copyFileSync(path.join(root, 'scripts', 'prepare-platform-packages.mjs'), path.join(directory, 'scripts', 'prepare-platform-packages.mjs'))
+  const command = npmCommand(['version', '9.0.0-test.2', '--no-git-tag-version', '--no-audit', '--no-fund'])
+  execFileSync(command.command, command.args, { cwd: directory, stdio: 'pipe' })
+  const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'))
+  const lock = JSON.parse(fs.readFileSync(path.join(directory, 'package-lock.json'), 'utf8'))
+  assert.equal(pkg.version, '9.0.0-test.2')
+  assert.equal(lock.version, pkg.version)
+  for (const target of Object.keys(TARGETS)) {
+    const name = `@zavora-ai/computer-use-mcp-${target}`
+    assert.equal(pkg.optionalDependencies[name], pkg.version)
+    assert.equal(lock.packages[`node_modules/${name}`].version, pkg.version)
+    assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'packages', `computer-use-mcp-${target}`, 'package.json'), 'utf8')).version, pkg.version)
   }
 })
 
