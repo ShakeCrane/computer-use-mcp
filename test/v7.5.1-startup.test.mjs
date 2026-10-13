@@ -36,7 +36,10 @@ test('checkInstall passes on this checkout', () => {
 
 test('checkInstall names node_modules, dist and the native addon when they are missing', async () => {
   const root = await mkdtemp(join(tmpdir(), 'cu-install-'))
+  const previousNativePath = process.env.COMPUTER_USE_NATIVE_PATH
   try {
+    // This missing-addon fixture must not inherit the source CI build override.
+    delete process.env.COMPUTER_USE_NATIVE_PATH
     await writeFile(join(root, 'package.json'), '{"name":"fixture","type":"module"}\n')
     const result = checkInstall(root, 'darwin', 'arm64')
     assert.equal(result.ok, false)
@@ -54,6 +57,8 @@ test('checkInstall names node_modules, dist and the native addon when they are m
     assert.equal(again.problems.length, 2, 'only the two dependency problems remain')
     assert.ok(again.problems.every(problem => /is not installed/.test(problem)))
   } finally {
+    if (previousNativePath === undefined) delete process.env.COMPUTER_USE_NATIVE_PATH
+    else process.env.COMPUTER_USE_NATIVE_PATH = previousNativePath
     await rm(root, { recursive: true, force: true })
   }
 })

@@ -47,12 +47,12 @@ must not make source validation pass through an installed optional package.
 See [the contributing guide](../CONTRIBUTING.md#using-the-checkout-native-build)
 for shell examples that leave the user's persistent environment unchanged.
 
-CI installs source test dependencies with `--omit=optional`, so the full fixture
-suite cannot resolve an old platform package and keeps its override environment
-clean for missing-addon fixtures. Source validation and each smoke step explicitly
-set the path to the downloaded build artifact and run the verifier before their
-existing checks. The consumer
-installation step has no source override and clears any inherited override in
+CI keeps normal dependency installation, including the Playwright types required
+by TypeScript. Source validation, the full suite and each smoke step explicitly
+set the path to the downloaded build artifact. Validation and smoke steps run the
+verifier before their existing checks. Missing-addon fixtures temporarily clear
+and restore the override within their own test process. The consumer installation
+step has no source override and clears any inherited override in
 its disposable child environment. It still proves that a normal npm install
 loads the matching platform package and that optional-package failures fall back
 to bundled binaries. No production resolver order or override semantics change.

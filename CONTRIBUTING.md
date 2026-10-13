@@ -95,7 +95,7 @@ On macOS/Linux, use a process-scoped override (from the repository root):
 ```bash
 native_path="$(node -p "require('node:path').resolve('computer-use-napi.' + process.platform + '-' + process.arch + '.node')")"
 COMPUTER_USE_NATIVE_PATH="$native_path" node scripts/verify-local-native.mjs
-# Use the same override for source smoke/server runs; see Testing for the fixture suite.
+COMPUTER_USE_NATIVE_PATH="$native_path" npm test
 ```
 
 On Windows PowerShell, restore the previous environment value after the run:
@@ -133,9 +133,8 @@ npm run build:ts
 npm test
 ```
 
-The full automated fixture suite uses the optional-free source installation
-described under Testing below. Source smoke/server runs use the explicit path
-shown above.
+For source-build validation, run the tests with the process-scoped native path
+shown above so an installed platform package cannot shadow the checkout artifact.
 
 ### Rust changes
 Edit files in `native/src/`, then:
@@ -158,20 +157,21 @@ npm run build
 
 ## Testing
 
-For the automated fixture suite, omit optional packages from this source checkout
-so it uses root build artifacts. Keep `COMPUTER_USE_NATIVE_PATH` unset in the test
-process: some tests deliberately simulate an installation with no native addon.
-This installation also omits optional browser features; normal consumer installs
-and source smoke/server runs can keep their optional packages.
+Install dependencies normally, then select the current checkout build for source
+tests. TypeScript compilation requires the optional Playwright types, so do not
+use `--omit=optional` for the source build. Negative installation fixtures isolate
+their override environment; consumer installation checks use separate processes
+without the source override.
 
 ```bash
-npm ci --omit=optional
-env -u COMPUTER_USE_NATIVE_PATH npm test
+npm ci
+native_path="$(node -p "require('node:path').resolve('computer-use-napi.' + process.platform + '-' + process.arch + '.node')")"
+COMPUTER_USE_NATIVE_PATH="$native_path" node scripts/verify-local-native.mjs
+COMPUTER_USE_NATIVE_PATH="$native_path" npm test
 ```
 
-On PowerShell, use the `try`/`finally` restoration pattern above with
-`$env:COMPUTER_USE_NATIVE_PATH = $null` while running `npm test` after
-`npm ci --omit=optional`. This leaves the previous value intact after the suite.
+On PowerShell, use the `try`/`finally` restoration pattern above and run `npm test`
+with the same source path. This leaves the previous value intact after the suite.
 
 This builds TypeScript and runs all tests in `test/`. The suite includes property-based tests (via fast-check) covering session semantics, focus strategies, target resolution, and tool schemas.
 
