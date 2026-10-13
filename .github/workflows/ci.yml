@@ -83,6 +83,27 @@ jobs:
           path: ${{ matrix.target.artifact }}
           if-no-files-found: error
 
+  platform-packages:
+    name: Pack all six native platform packages
+    needs: build-native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: computer-use-napi.*.node
+          merge-multiple: true
+      - name: Synchronize versions, require every artifact, and verify tarball contents
+        run: npm run pack:platforms
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-platform-packages
+          path: release/platform/
+          if-no-files-found: error
+
   lint:
     name: Lint TypeScript
     runs-on: ubuntu-latest
@@ -152,7 +173,7 @@ jobs:
 
   test:
     name: Test — ${{ matrix.os.name }}
-    needs: build-native
+    needs: [build-native, platform-packages]
     runs-on: ${{ matrix.os.runner }}
     strategy:
       fail-fast: false
@@ -200,6 +221,15 @@ jobs:
       - name: Run full test suite (all platforms)
         shell: bash
         run: node --test test/*.test.mjs
+
+      - name: Download packed native packages
+        uses: actions/download-artifact@v4
+        with:
+          name: native-platform-packages
+          path: release/platform
+
+      - name: Verify automatic optional package installation and native loading
+        run: node test/platform-install.mjs
 
       - name: Run smoke test (Windows)
         if: runner.os == 'Windows'
@@ -334,9 +364,9 @@ jobs:
 
   publish:
     name: Stage npm release for approval
-    needs: [build-native, lint, native-checks, test, package, install-matrix]
+    needs: [build-native, platform-packages, lint, native-checks, test, package, install-matrix]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.repository == 'zavora-ai/computer-use-mcp' && github.ref == 'refs/heads/main' && github.event_name == 'push'
     permissions:
       contents: read
       id-token: write
@@ -349,6 +379,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --force
@@ -357,7 +388,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: .
+          pattern: computer-use-napi.*.node
           merge-multiple: true
+
+      - name: Download exact tested platform tarballs
+        uses: actions/download-artifact@v4
+        with:
+          name: native-platform-packages
+          path: release/platform
 
       - name: Verify binaries exist
         run: |
@@ -395,8 +433,10 @@ jobs:
             process.stdin.on("data", chunk => source += chunk);
             process.stdin.on("end", () => {
               const manifest = JSON.parse(source);
-              if (Object.keys(manifest.optionalDependencies ?? {}).some(name => name.startsWith("@zavora-ai/computer-use-mcp-"))) {
-                throw new Error("staged universal package must not reference unbootstrapped optional packages");
+              for (const target of ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"]) {
+                if (manifest.optionalDependencies?.[`@zavora-ai/computer-use-mcp-${target}`] !== manifest.version) {
+                  throw new Error(`optional native package ${target} must match the main version`);
+                }
               }
               console.log("universal tarball contains all six native targets");
             });
@@ -411,6 +451,7 @@ jobs:
           subject-path: |
             computer-use-napi.*.node
             release/root/*.tgz
+            release/platform/*.tgz
 
       - name: Attach SBOM attestation to the exact main tarball
         uses: actions/attest-sbom@v2
@@ -426,6 +467,13 @@ jobs:
             release/
             release-sbom.cdx.json
           if-no-files-found: error
+
+      # New npm names need a maintainer session or stage-only token once, before
+      # trusted publishing can be configured. OIDC handles subsequent releases.
+      - name: Stage all native packages with provenance for maintainer approval
+        run: node scripts/stage-platform-packages.mjs
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_NATIVE_STAGE_TOKEN }}
 
       - name: Stage main package for maintainer approval
         run: |

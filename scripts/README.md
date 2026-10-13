@@ -12,12 +12,17 @@ need a native build and OS permissions. They are not unattended unit tests.
 | `npm run test:input-attribution` | Measure physical-input detection on a supported desktop. |
 | `npm run measure:efficiency` | Compare catalog and observation payload sizes. |
 | `npm run evaluate:strategy -- baseline.json candidate.json` | Compare matched, independently verified task traces. |
-| `npm run prepare:packages` | Stamp platform manifests and copy available native binaries. |
+| `npm run prepare:packages` | Synchronize native versions and optional pins, and copy available native binaries. |
+| `npm run pack:platforms` | Require all six build artifacts and pack verified native tarballs. |
+| `node test/platform-install.mjs` | Install packed native dependencies using a disposable local registry and load the addon. |
 
 `build-ts.mjs` compiles TypeScript into `dist.next` and swaps it into `dist`, so a server starting mid-build still finds its files (`clean-dist.mjs` only removes generated output). `live-windows.mjs` is
 an attended Windows development probe. Legacy Mission Control/Spaces experiments
 and obsolete v3–v5 scripts were removed in v7.2; their history remains in Git.
 Only `verify-input-attribution.mjs` is included as a script in the npm package.
+
+See [Native package releases](../docs/NATIVE-PACKAGES.md) for version synchronization,
+CI artifacts, first-publication setup and maintainer approval order.
 
 ## `npm run integration:macos`
 

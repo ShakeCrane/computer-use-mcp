@@ -79,6 +79,9 @@ dist/             Compiled TypeScript output (generated, not committed)
 
 ## Making changes
 
+For native package versioning, packing, CI and npm staged publishing, see
+[Native package releases](docs/NATIVE-PACKAGES.md).
+
 ### TypeScript changes
 Edit files in `src/`, then:
 ```bash
