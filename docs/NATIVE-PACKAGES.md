@@ -85,10 +85,17 @@ After all existing release gates pass, the upstream main-push release job:
    --provenance`, then stages the main tarball with the existing approval flow.
 
 Only this upstream repository can stage releases; fork and PR workflows only
-build and test. An already pending staged native version is reported for review,
-without trying to overwrite it. A partial staging failure can be retried; npm
-publication is not atomic across seven packages. Review the pending tarballs
-against the matching release evidence, approve all six native packages first,
+build and test. Every failed staging request, including an already pending
+version (E409), fails the release; unverified pending contents are never skipped
+as a success. Errors identify the package/version, commit, tarball and integrity.
+A native staging failure prevents the main staging step. Already staged packages
+are not rolled back automatically; publication is not atomic across seven packages.
+Use a maintainer session to inspect conflicting pending tarballs against the
+original run's immutable release evidence. Reuse those exact tarballs when
+recovering the same release; rebuilding the same commit need not reproduce the
+same bytes. Changed contents require a new synchronized version. CI does not
+add credentials for inspecting, approving or rejecting pending packages.
+Review the matching release evidence, approve all six native packages first,
 then approve the main package. Neither the workflow nor the scripts approve
 packages automatically. Existing published main versions remain immutable;
 a version bump is required for the new optional dependency declaration to reach

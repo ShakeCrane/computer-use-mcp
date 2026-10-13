@@ -43,17 +43,22 @@ export function stagePlatformPackages(directory = root, npm = runNpm) {
       console.log(`${spec} already published with identical integrity — skipping`)
     } else {
       if (errorCode(existing) !== 'E404') throw new Error(`Cannot check ${spec}: ${existing.stderr || existing.stdout}`)
-      pending.push({ spec, archive })
+      pending.push({ spec, archive, integrity })
     }
   }
-  for (const { spec, archive } of pending) {
+  for (const { spec, archive, integrity } of pending) {
     const result = npm(['stage', 'publish', archive, '--access', 'public', '--provenance', '--ignore-scripts', '--json'])
     if (result.status !== 0) {
-      if (errorCode(result) === 'E409' && /Cannot stage previously published version|already staged/i.test(result.stdout)) {
-        console.warn(`${spec} already staged; review the pending tarball and release evidence before approving`)
-        continue
-      }
-      throw new Error(`Cannot stage ${spec}: ${result.stderr || result.stdout}`)
+      const git = process.env.GITHUB_SHA ? undefined : spawnSync('git', ['rev-parse', 'HEAD'], {
+        cwd: directory, encoding: 'utf8', timeout: 5000,
+      })
+      const commit = process.env.GITHUB_SHA || (git?.status === 0 ? git.stdout.trim() : 'unavailable')
+      throw new Error(
+        `Cannot stage ${spec} (${errorCode(result) ?? `exit ${result.status}`}): ${result.stderr || result.stdout}\n` +
+        `Commit: ${commit}\nArtifact: ${archive}\nIntegrity: ${integrity}\n` +
+        `Release evidence: release-evidence-${commit}\n` +
+        'Staging stopped; verify any pending tarball against this release evidence before approval.',
+      )
     }
     console.log(result.stdout)
   }

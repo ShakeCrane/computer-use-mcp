@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import { tmpdir } from 'node:os'
 import * as path from 'node:path'
@@ -78,10 +79,49 @@ test('local corruption, duplicate targets and version skew prevent staging', t =
   assert.throws(() => stagePlatformPackages(directory), /Invalid native release metadata/)
 })
 
-test('pending staged versions are tolerated; unrelated conflicts and publish failures propagate', t => {
-  const { directory } = fixture(t)
-  stagePlatformPackages(directory, args => args[0] === 'view' ? error('E404') : error('E409', 'Cannot stage previously published version'))
-  for (const result of [error('E409', 'other conflict'), error('E403', 'publish denied')]) {
-    assert.throws(() => stagePlatformPackages(directory, args => args[0] === 'view' ? error('E404') : result), /Cannot stage/)
+test('every staging conflict fails closed and stops the remaining native publishes', t => {
+  const { directory, packages } = fixture(t)
+  for (const summary of ['Cannot stage previously published version', 'already staged', 'other conflict']) {
+    for (const conflictAt of [0, 2]) {
+      const staged = []
+      assert.throws(() => stagePlatformPackages(directory, args => {
+        if (args[0] === 'view') return error('E404')
+        staged.push(args[2])
+        return staged.length === conflictAt + 1 ? error('E409', summary) : { status: 0, stdout: '{}', stderr: '' }
+      }), thrown => {
+        assert.match(thrown.message, /Cannot stage .*E409/)
+        assert.ok(thrown.message.includes(`${packages[conflictAt].name}@${packages[conflictAt].version}`))
+        assert.ok(thrown.message.includes(packages[conflictAt].filename))
+        assert.ok(thrown.message.includes(packages[conflictAt].integrity))
+        assert.match(thrown.message, /Commit: .*\nArtifact: .*\nIntegrity: /)
+        return true
+      })
+      assert.deepEqual(staged, packages.slice(0, conflictAt + 1).map(pkg => path.join(directory, 'release', 'platform', pkg.filename)))
+    }
   }
+})
+
+test('an unverified staging conflict exits nonzero with the commit and artifact context', t => {
+  const { directory, packages } = fixture(t)
+  const commit = 'a'.repeat(40)
+  const script = `
+    import { stagePlatformPackages } from ${JSON.stringify(new URL('../scripts/stage-platform-packages.mjs', import.meta.url).href)};
+    stagePlatformPackages(${JSON.stringify(directory)}, args => ({
+      status: 1, stderr: '', stdout: JSON.stringify({error: {code: args[0] === 'view' ? 'E404' : 'E409', summary: 'already staged'}}),
+    }));
+  `
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf8', env: { ...process.env, GITHUB_SHA: commit },
+  })
+  assert.equal(result.error, undefined)
+  assert.notEqual(result.status, 0)
+  assert.ok(result.stderr.includes(`Commit: ${commit}`))
+  assert.ok(result.stderr.includes(`${packages[0].name}@${packages[0].version}`))
+  assert.ok(result.stderr.includes(packages[0].filename))
+  assert.ok(result.stderr.includes(packages[0].integrity))
+})
+
+test('other staging failures also propagate', t => {
+  const { directory } = fixture(t)
+  assert.throws(() => stagePlatformPackages(directory, args => args[0] === 'view' ? error('E404') : error('E403', 'publish denied')), /Cannot stage/)
 })
